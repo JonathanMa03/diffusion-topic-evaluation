@@ -201,6 +201,74 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Project-specific data folders
+data/raw/
+data/interim/
+data/processed/
+data/external/
+
+# SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+db/*.db
+db/*.sqlite
+db/*.sqlite3
+
+# Large model/artifact outputs
+outputs/models/
+outputs/figures/
+outputs/tables/
+outputs/reports/
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Local experiment files
+mlruns/
+wandb/
+logs/
+tmp/
+temp/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# macOS / editor clutter
+.DS_Store
+.vscode/
+.idea/
+
+# Optional cache/artifacts
+.cache/
+.pytest_cache/
+.mypy_cache/
+ruff_cache/
+
+# Serialized arrays / embeddings / checkpoints
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.joblib
+*.pkl
+*.parquet
+
+# Keep empty project dirs if needed
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/external/.gitkeep
+!outputs/figures/.gitkeep
+!outputs/tables/.gitkeep
+!outputs/models/.gitkeep
+!outputs/reports/.gitkeep
+!db/migrations/.gitkeep
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
