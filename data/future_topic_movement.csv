@@ -1,0 +1,13 @@
+topic_id,topic_label,latest_year,future_sigma,movement_norm,cosine_similarity_to_latest
+0,Public Health & Workforce Impact,2022,0.08,0.29835317,0.92673856
+1,Online Education & Training,2022,0.08,0.16470824,0.98649794
+2,Clinical Virology & Infection,2022,0.08,0.09907587,0.9950043
+3,Medical Imaging & Deep Learning,2022,0.08,0.07265237,0.99740994
+4,Financial Markets & Economic Impact,2022,0.08,0.26454753,0.9718067
+5,Mental Health & Psychological Effects,2022,0.08,0.21109971,0.97121906
+8,Severe Disease & Immune Response,2022,0.08,0.087285966,0.99574643
+9,Food Systems & Hospitality Impact,2022,0.08,0.33908948,0.95566964
+10,"Prevention, Masks & Environmental Effects",2022,0.08,0.21093667,0.9862263
+11,"Policy, Governance & Public Response",2022,0.08,0.28723708,0.93910784
+12,Clinical Care & Procedures,2022,0.08,0.11211713,0.99171406
+14,Hospitalization & Patient Outcomes,2022,0.08,0.18457702,0.97787243
