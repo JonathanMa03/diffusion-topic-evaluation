@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS documents (
     publication_date TEXT,
     journal TEXT,
     clean_text TEXT,
+    article_date TEXT,
+    article_year INTEGER,
+    journal_pub_date TEXT,
+    journal_pub_year INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source, source_doc_id)
 );
