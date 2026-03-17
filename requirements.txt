@@ -28,3 +28,10 @@ joblib
 pytest
 black
 ruff
+
+jupyter
+jupyterlab
+ipykernel
+notebook
+
+requests
