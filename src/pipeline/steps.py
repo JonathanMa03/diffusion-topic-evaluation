@@ -39,17 +39,239 @@ def step_embeddings(config):
 
 def step_topics(config):
     print("[STEP] Topic Discovery")
+
+    import pickle
+    import sqlite3
+
+    import numpy as np
+    import pandas as pd
+    import hdbscan
+    from sklearn.preprocessing import normalize
+    from sklearn.metrics.pairwise import cosine_similarity
+
     _check_file_exists(config.db_path, "Database")
 
+    hdbscan_assignments_path = config.data_path / "hdbscan_assignments.csv"
+    hdbscan_lineage_path = config.data_path / "hdbscan_lineage.csv"
+
+    config.data_path.mkdir(parents=True, exist_ok=True)
+
     print(f"  Using DB: {config.db_path}")
+    print(f"  Years: {config.start_year} → {config.end_year}")
     print(f"  HDBSCAN min_cluster_size: {config.hdbscan_min_cluster_size}")
     print(f"  HDBSCAN min_samples: {config.hdbscan_min_samples}")
-    print("  Status: not implemented yet")
 
-    raise NotImplementedError(
-        "Topic step is not implemented yet. "
-        "Next action: move notebook 03/04/07 topic discovery and lineage logic into step_topics(config)."
+    conn = sqlite3.connect(config.db_path)
+
+    docs_df = pd.read_sql_query("""
+        SELECT
+            d.id AS document_id,
+            d.publication_year,
+            d.title,
+            d.clean_text,
+            e.embedding
+        FROM documents d
+        JOIN document_embeddings e
+            ON d.id = e.document_id
+        WHERE e.model_name = ?
+          AND d.publication_year BETWEEN ? AND ?
+        ORDER BY d.publication_year, d.id
+    """, conn, params=[config.embedding_model_name, config.start_year, config.end_year])
+
+    conn.close()
+
+    if docs_df.empty:
+        raise ValueError(
+            f"No documents with embeddings found for years "
+            f"{config.start_year}–{config.end_year} "
+            f"and model {config.embedding_model_name}."
+        )
+
+    docs_df["embedding"] = docs_df["embedding"].apply(
+        lambda x: np.array(pickle.loads(x), dtype=np.float32)
     )
+
+    print(f"  Loaded {len(docs_df)} embedded documents")
+
+    year_counts = docs_df["publication_year"].value_counts().sort_index()
+    print("  Documents per year:")
+    for year, n in year_counts.items():
+        print(f"   - {year}: {n}")
+
+    # normalize embeddings
+    X_all = np.vstack(docs_df["embedding"].values)
+    X_all_norm = normalize(X_all, norm="l2")
+    docs_df["embedding_norm"] = list(X_all_norm)
+
+    # cluster each year independently
+    yearly_clustered = []
+
+    for year in sorted(docs_df["publication_year"].unique()):
+        year_df = docs_df[docs_df["publication_year"] == year].copy()
+        X_year = np.vstack(year_df["embedding_norm"].values)
+
+        clusterer = hdbscan.HDBSCAN(
+            min_cluster_size=config.hdbscan_min_cluster_size,
+            min_samples=config.hdbscan_min_samples,
+            metric="euclidean"
+        )
+
+        labels = clusterer.fit_predict(X_year)
+        year_df["hdbscan_label"] = labels
+
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = int((labels == -1).sum())
+
+        print(
+            f"  Year {year} | docs={len(year_df)} | "
+            f"clusters={n_clusters} | noise_docs={n_noise}"
+        )
+
+        yearly_clustered.append(year_df)
+
+    hdbscan_df = pd.concat(yearly_clustered, ignore_index=True)
+
+    # save assignments
+    hdbscan_df[["document_id", "publication_year", "hdbscan_label"]].to_csv(
+        hdbscan_assignments_path,
+        index=False
+    )
+    print(f"  Saved HDBSCAN assignments to: {hdbscan_assignments_path}")
+
+    # filter out noise points
+    clustered_df = hdbscan_df[hdbscan_df["hdbscan_label"] != -1].copy()
+
+    if clustered_df.empty:
+        raise ValueError(
+            "All points were labeled as HDBSCAN noise. "
+            "Try lowering min_cluster_size or min_samples."
+        )
+
+    # compute centroids per (year, cluster)
+    centroids = []
+
+    for (year, label), group in clustered_df.groupby(["publication_year", "hdbscan_label"]):
+        X = np.vstack(group["embedding_norm"].values)
+
+        centroid = X.mean(axis=0)
+        centroid = centroid / np.linalg.norm(centroid)
+
+        centroids.append({
+            "publication_year": int(year),
+            "cluster_id": int(label),
+            "centroid": centroid.astype(np.float32),
+            "n_docs": int(len(group)),
+        })
+
+    centroids_df = pd.DataFrame(centroids)
+
+    print(f"  Built {len(centroids_df)} yearly topic centroids")
+
+    years = sorted(centroids_df["publication_year"].unique())
+    if len(years) < 2:
+        raise ValueError(
+            "Need at least two years with non-noise HDBSCAN clusters to build lineage."
+        )
+
+    # initialize lineage from first year
+    lineage_records = []
+    next_lineage_id = 0
+
+    first_year = years[0]
+    first_centroids = centroids_df[centroids_df["publication_year"] == first_year].copy()
+
+    lineage_maps = {first_year: {}}
+
+    for _, row in first_centroids.iterrows():
+        cid = int(row["cluster_id"])
+        lineage_maps[first_year][cid] = next_lineage_id
+
+        lineage_records.append({
+            "lineage_id": next_lineage_id,
+            "year": int(first_year),
+            "cluster_id": cid,
+            "n_docs": int(row["n_docs"]),
+        })
+        next_lineage_id += 1
+
+    print(f"  Initialized {len(first_centroids)} lineages from {first_year}")
+
+    # match adjacent years
+    sim_threshold = 0.8
+
+    for idx in range(len(years) - 1):
+        y_prev = years[idx]
+        y_next = years[idx + 1]
+
+        prev_df = centroids_df[centroids_df["publication_year"] == y_prev].copy()
+        next_df = centroids_df[centroids_df["publication_year"] == y_next].copy()
+
+        X_prev = np.vstack(prev_df["centroid"].values)
+        X_next = np.vstack(next_df["centroid"].values)
+
+        sim_matrix = cosine_similarity(X_prev, X_next)
+
+        matches = []
+        for i, row in enumerate(sim_matrix):
+            best_j = np.argmax(row)
+            best_sim = float(row[best_j])
+
+            matches.append({
+                "cluster_prev": int(prev_df.iloc[i]["cluster_id"]),
+                "cluster_next": int(next_df.iloc[best_j]["cluster_id"]),
+                "similarity": best_sim,
+            })
+
+        matches_df = pd.DataFrame(matches)
+
+        lineage_maps[y_next] = {}
+
+        # propagate persistent matches
+        for _, row in matches_df.iterrows():
+            cid_prev = int(row["cluster_prev"])
+            cid_next = int(row["cluster_next"])
+            sim = float(row["similarity"])
+
+            if sim >= sim_threshold and cid_prev in lineage_maps[y_prev]:
+                lineage_maps[y_next][cid_next] = lineage_maps[y_prev][cid_prev]
+
+        # births for unmatched next-year clusters
+        all_next_clusters = set(next_df["cluster_id"].astype(int).tolist())
+        already_assigned = set(lineage_maps[y_next].keys())
+        birth_clusters = sorted(all_next_clusters - already_assigned)
+
+        for cid in birth_clusters:
+            lineage_maps[y_next][cid] = next_lineage_id
+            next_lineage_id += 1
+
+        # save clean records for y_next
+        for _, row in next_df.iterrows():
+            cid = int(row["cluster_id"])
+            lineage_id = lineage_maps[y_next][cid]
+
+            lineage_records.append({
+                "lineage_id": lineage_id,
+                "year": int(y_next),
+                "cluster_id": cid,
+                "n_docs": int(row["n_docs"]),
+            })
+
+        print(
+            f"  Matched {y_prev} → {y_next} | "
+            f"persistent={sum(matches_df['similarity'] >= sim_threshold)} | "
+            f"births={len(birth_clusters)}"
+        )
+
+    lineage_df = pd.DataFrame(lineage_records).sort_values(["lineage_id", "year"])
+
+    lineage_df.to_csv(hdbscan_lineage_path, index=False)
+    print(f"  Saved lineage to: {hdbscan_lineage_path}")
+
+    # lightweight validation
+    if lineage_df.empty:
+        raise ValueError("Lineage dataframe is empty after topic processing.")
+
+    print(f"  Final lineage rows: {len(lineage_df)}")
 
 
 def step_diffusion(config):
