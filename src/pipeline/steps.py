@@ -25,6 +25,14 @@ def step_ingestion(config):
     config.db_path.parent.mkdir(parents=True, exist_ok=True)
     config.data_path.mkdir(parents=True, exist_ok=True)
 
+    config.run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_data_dir = config.run_dir / "data"
+    run_metadata_dir = config.run_dir / "metadata"
+
+    run_data_dir.mkdir(parents=True, exist_ok=True)
+    run_metadata_dir.mkdir(parents=True, exist_ok=True)
+
     # --- DB schema bootstrap ---
     conn = sqlite3.connect(config.db_path)
     conn.executescript("""
@@ -89,6 +97,12 @@ def step_ingestion(config):
         pubmed_query = f"({config.pubmed_query}) AND {config.start_year}:{config.end_year}[pdat]"
     else:
         pubmed_query = f"{config.start_year}:{config.end_year}[pdat]"
+
+    query_file = run_metadata_dir / "pubmed_query.txt"
+    with open(query_file, "w") as f:
+        f.write(pubmed_query)
+
+    print(f"  Saved query to: {query_file}")
 
     search_page_size = 200
     fetch_batch_size = 25
@@ -260,6 +274,12 @@ def step_ingestion(config):
 
     print(f"  Final PMID count collected: {len(all_pmids)}")
 
+    pmid_file = run_data_dir / "pmids.txt"
+    with open(pmid_file, "w") as f:
+        for pmid in all_pmids:
+            f.write(f"{pmid}\n")
+
+    print(f"  Saved PMID list to: {pmid_file}")
     # --- Fetch XML in batches ---
     all_records = []
     n_batches = (len(all_pmids) + fetch_batch_size - 1) // fetch_batch_size
@@ -280,6 +300,9 @@ def step_ingestion(config):
     # --- Clean ---
     df_raw = pd.DataFrame(all_records)
     print(f"  Raw parsed records: {len(df_raw)}")
+    raw_records_path = run_data_dir / "raw_records.csv"
+    df_raw.to_csv(raw_records_path, index=False)
+    print(f"  Saved raw parsed records to: {raw_records_path}")
 
     df = df_raw.copy()
     df = df.dropna(subset=["title", "abstract", "publication_year"])
@@ -316,6 +339,9 @@ def step_ingestion(config):
         )
 
     print(f"  Cleaned records to insert: {len(df)}")
+    cleaned_records_path = run_data_dir / "cleaned_records.csv"
+    df.to_csv(cleaned_records_path, index=False)
+    print(f"  Saved cleaned records to: {cleaned_records_path}")
 
     # --- Insert ---
     cols = [
@@ -392,6 +418,32 @@ def step_ingestion(config):
             "Duplicate (source, source_doc_id) rows detected after ingestion.\n"
             "This suggests the DB uniqueness constraint or insert logic is inconsistent."
         )
+
+    import json
+
+    summary = {
+        "run_name": config.run_name,
+        "start_year": config.start_year,
+        "end_year": config.end_year,
+        "pubmed_query": config.pubmed_query,
+        "resolved_pubmed_query": pubmed_query,
+        "pmids_collected": len(all_pmids),
+        "raw_records": int(len(df_raw)),
+        "cleaned_records": int(len(df)),
+        "rows_before_insert": int(before_n),
+        "rows_after_insert": int(after_n),
+        "rows_newly_added": int(after_n - before_n),
+        "year_counts": {
+            str(int(row["publication_year"])): int(row["n_docs"])
+            for _, row in year_counts.iterrows()
+        },
+    }
+
+    summary_file = run_metadata_dir / "ingestion_summary.json"
+    with open(summary_file, "w") as f:
+        json.dump(summary, f, indent=2)
+
+    print(f"  Saved ingestion summary to: {summary_file}")
 
     conn.close()
     print("  Ingestion completed successfully with no duplicate document keys")
@@ -528,8 +580,17 @@ def step_topics(config):
 
     _check_file_exists(config.db_path, "Database")
 
+    config.data_path.mkdir(parents=True, exist_ok=True)
+    config.run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_data_dir = config.run_dir / "data"
+    run_data_dir.mkdir(parents=True, exist_ok=True)
+
     hdbscan_assignments_path = config.data_path / "hdbscan_assignments.csv"
     hdbscan_lineage_path = config.data_path / "hdbscan_lineage.csv"
+
+    run_hdbscan_assignments_path = run_data_dir / "hdbscan_assignments.csv"
+    run_hdbscan_lineage_path = run_data_dir / "hdbscan_lineage.csv"
 
     config.data_path.mkdir(parents=True, exist_ok=True)
 
@@ -614,11 +675,13 @@ def step_topics(config):
     hdbscan_df = pd.concat(yearly_clustered, ignore_index=True)
 
     # save assignments
-    hdbscan_df[["document_id", "publication_year", "hdbscan_label"]].to_csv(
-        hdbscan_assignments_path,
-        index=False
-    )
-    print(f"  Saved HDBSCAN assignments to: {hdbscan_assignments_path}")
+    assignments_df = hdbscan_df[["document_id", "publication_year", "hdbscan_label"]].copy()
+
+    assignments_df.to_csv(hdbscan_assignments_path, index=False)
+    assignments_df.to_csv(run_hdbscan_assignments_path, index=False)
+
+    print(f"  Saved shared HDBSCAN assignments to: {hdbscan_assignments_path}")
+    print(f"  Saved run-specific HDBSCAN assignments to: {run_hdbscan_assignments_path}")
 
     # filter out noise points
     clustered_df = hdbscan_df[hdbscan_df["hdbscan_label"] != -1].copy()
@@ -646,7 +709,17 @@ def step_topics(config):
         })
 
     centroids_df = pd.DataFrame(centroids)
+    centroids_path = config.data_path / "hdbscan_centroids.pkl"
+    run_centroids_path = run_data_dir / "hdbscan_centroids.pkl"
 
+    with open(centroids_path, "wb") as f:
+        pickle.dump(centroids_df, f)
+
+    with open(run_centroids_path, "wb") as f:
+        pickle.dump(centroids_df, f)
+
+    print(f"  Saved shared centroids to: {centroids_path}")
+    print(f"  Saved run-specific centroids to: {run_centroids_path}")
     print(f"  Built {len(centroids_df)} yearly topic centroids")
 
     years = sorted(centroids_df["publication_year"].unique())
@@ -747,13 +820,17 @@ def step_topics(config):
     lineage_df = pd.DataFrame(lineage_records).sort_values(["lineage_id", "year"])
 
     lineage_df.to_csv(hdbscan_lineage_path, index=False)
-    print(f"  Saved lineage to: {hdbscan_lineage_path}")
+    lineage_df.to_csv(run_hdbscan_lineage_path, index=False)
+
+    print(f"  Saved shared lineage to: {hdbscan_lineage_path}")
+    print(f"  Saved run-specific lineage to: {run_hdbscan_lineage_path}")
 
     # lightweight validation
     if lineage_df.empty:
         raise ValueError("Lineage dataframe is empty after topic processing.")
 
     print(f"  Final lineage rows: {len(lineage_df)}")
+    print("  Topic artifacts saved successfully")
 
 
 def step_diffusion(config):
@@ -773,9 +850,22 @@ def step_diffusion(config):
     traj_path = config.data_path / "topic_trajectories.pkl"
     _check_file_exists(traj_path, "Topic trajectories artifact")
 
+    config.data_path.mkdir(parents=True, exist_ok=True)
+    config.run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_data_dir = config.run_dir / "data"
+    run_models_dir = config.run_dir / "models"
+
+    run_data_dir.mkdir(parents=True, exist_ok=True)
+    run_models_dir.mkdir(parents=True, exist_ok=True)
+
     future_csv_path = config.data_path / "future_topic_movement.csv"
     future_pkl_path = config.data_path / "future_topic_states.pkl"
     model_path = config.data_path / "diffusion_mlp.pt"
+
+    run_future_csv_path = run_data_dir / "future_topic_movement.csv"
+    run_future_pkl_path = run_data_dir / "future_topic_states.pkl"
+    run_model_path = run_models_dir / "diffusion_mlp.pt"
 
     print(f"  Using trajectories: {traj_path}")
 
@@ -1064,21 +1154,26 @@ def step_diffusion(config):
 
     history_df = pd.DataFrame(history)
 
-    print(f"  Saving model to: {model_path}")
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "embedding_dim": X_curr.shape[1],
-            "epochs": epochs,
-            "history": history,
-            "validation_noisy_mse": float(mse_noisy),
-            "validation_denoised_mse": float(mse_pred),
-        },
-        model_path,
-    )
+    model_artifact = {
+    "model_state_dict": model.state_dict(),
+    "embedding_dim": X_curr.shape[1],
+    "epochs": epochs,
+    "history": history,
+    "validation_noisy_mse": float(mse_noisy),
+    "validation_denoised_mse": float(mse_pred),
+    }
 
-    print(f"  Saving future movement CSV to: {future_csv_path}")
+    print(f"  Saving shared model to: {model_path}")
+    torch.save(model_artifact, model_path)
+
+    print(f"  Saving run-specific model to: {run_model_path}")
+    torch.save(model_artifact, run_model_path)
+
+    print(f"  Saving shared future movement CSV to: {future_csv_path}")
     future_results_df.to_csv(future_csv_path, index=False)
+
+    print(f"  Saving run-specific future movement CSV to: {run_future_csv_path}")
+    future_results_df.to_csv(run_future_csv_path, index=False)
 
     future_state_artifact = {
         "topic_ids": future_df["topic_id"].tolist(),
@@ -1094,11 +1189,21 @@ def step_diffusion(config):
         "validation_denoised_mse": float(mse_pred),
     }
 
-    print(f"  Saving future topic states to: {future_pkl_path}")
+    print(f"  Saving shared future topic states to: {future_pkl_path}")
     with open(future_pkl_path, "wb") as f:
         pickle.dump(future_state_artifact, f)
 
+    print(f"  Saving run-specific future topic states to: {run_future_pkl_path}")
+    with open(run_future_pkl_path, "wb") as f:
+        pickle.dump(future_state_artifact, f)
+
     print("  Diffusion artifacts saved successfully")
+    print(f"   - shared CSV: {future_csv_path}")
+    print(f"   - shared PKL: {future_pkl_path}")
+    print(f"   - shared model: {model_path}")
+    print(f"   - run CSV: {run_future_csv_path}")
+    print(f"   - run PKL: {run_future_pkl_path}")
+    print(f"   - run model: {run_model_path}")
 
 
 def step_visualizations(config):
@@ -1123,6 +1228,10 @@ def step_visualizations(config):
         _check_file_exists(path, "Visualization input artifact")
 
     config.outputs_path.mkdir(parents=True, exist_ok=True)
+    config.run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_outputs_dir = config.run_dir / "outputs"
+    run_outputs_dir.mkdir(parents=True, exist_ok=True)
 
     print("  Loading artifacts...")
     with open(traj_path, "rb") as f:
@@ -1185,7 +1294,10 @@ def step_visualizations(config):
     plt.ylabel("Topic")
     plt.title("Predicted 2023 Topic Movement (Neural Denoiser)")
     plt.tight_layout()
-    plt.savefig(config.outputs_path / "movement_norm.png", dpi=300, bbox_inches="tight")
+    shared_path = config.outputs_path / "movement_norm.png"
+    run_path = run_outputs_dir / "movement_norm.png"
+    plt.savefig(shared_path, dpi=300, bbox_inches="tight")
+    plt.savefig(run_path, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("  Saving cosine similarity plot...")
@@ -1197,7 +1309,10 @@ def step_visualizations(config):
     plt.ylabel("Topic")
     plt.title("Predicted 2023 Stability Relative to 2022")
     plt.tight_layout()
-    plt.savefig(config.outputs_path / "cosine_sim_latest.png", dpi=300, bbox_inches="tight")
+    shared_path = config.outputs_path / "cosine_sim_latest.png"
+    run_path = run_outputs_dir / "cosine_sim_latest.png"
+    plt.savefig(shared_path, dpi=300, bbox_inches="tight")
+    plt.savefig(run_path, dpi=300, bbox_inches="tight")
     plt.close()    
 
     print("  Saving top-8 PCA trajectories...")
@@ -1278,7 +1393,10 @@ def step_visualizations(config):
     plt.legend(title="Year", loc="upper left", bbox_to_anchor=(1.01, 1))
     plt.grid(alpha=0.25)
     plt.tight_layout()
-    plt.savefig(config.outputs_path / "top8_pca.png", dpi=300, bbox_inches="tight")
+    shared_path = config.outputs_path / "top8_pca.png"
+    run_path = run_outputs_dir / "top8_pca.png"
+    plt.savefig(shared_path, dpi=300, bbox_inches="tight")
+    plt.savefig(run_path, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("  Saving lineage plot...")
@@ -1404,11 +1522,20 @@ def step_visualizations(config):
     plt.title("Dynamic Topic Lineages (HDBSCAN + Semantic Labels)", fontsize=14)
     plt.grid(axis="x", alpha=0.2)
     plt.subplots_adjust(left=0.38)
-    plt.savefig(config.outputs_path / "linneage.png", dpi=300, bbox_inches="tight")
+    shared_path = config.outputs_path / "linneage.png"
+    run_path = run_outputs_dir / "linneage.png"
+    plt.savefig(shared_path, dpi=300, bbox_inches="tight")
+    plt.savefig(run_path, dpi=300, bbox_inches="tight")
     plt.close()
 
-    print("  Saved outputs:")
+    print("  Saved shared outputs:")
     print(f"   - {config.outputs_path / 'movement_norm.png'}")
     print(f"   - {config.outputs_path / 'cosine_sim_latest.png'}")
     print(f"   - {config.outputs_path / 'top8_pca.png'}")
     print(f"   - {config.outputs_path / 'linneage.png'}")
+
+    print("  Saved run-specific outputs:")
+    print(f"   - {run_outputs_dir / 'movement_norm.png'}")
+    print(f"   - {run_outputs_dir / 'cosine_sim_latest.png'}")
+    print(f"   - {run_outputs_dir / 'top8_pca.png'}")
+    print(f"   - {run_outputs_dir / 'linneage.png'}")

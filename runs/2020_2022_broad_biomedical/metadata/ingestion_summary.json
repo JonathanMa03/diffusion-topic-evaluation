@@ -1,0 +1,18 @@
+{
+  "run_name": "2020_2022_broad_biomedical",
+  "start_year": 2020,
+  "end_year": 2022,
+  "pubmed_query": "",
+  "resolved_pubmed_query": "2020:2022[pdat]",
+  "pmids_collected": 1000,
+  "raw_records": 964,
+  "cleaned_records": 915,
+  "rows_before_insert": 2437,
+  "rows_after_insert": 3193,
+  "rows_newly_added": 756,
+  "year_counts": {
+    "2020": 482,
+    "2021": 314,
+    "2022": 672
+  }
+}
