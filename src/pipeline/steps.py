@@ -51,7 +51,12 @@ def step_embeddings(config):
         conn.close()
         raise ValueError(
             f"No documents found in database for years "
-            f"{config.start_year}–{config.end_year}."
+            f"{config.start_year}–{config.end_year}.\n\n"
+            "Likely causes:\n"
+            "- You have not run ingestion yet\n"
+            "- The selected date range has no data\n\n"
+            "Fix:\n"
+            "Run: python -m scripts.run_ingestion"
         )
 
     existing_df = pd.read_sql_query("""
@@ -179,10 +184,15 @@ def step_topics(config):
     conn.close()
 
     if docs_df.empty:
+        conn.close()
         raise ValueError(
-            f"No documents with embeddings found for years "
-            f"{config.start_year}–{config.end_year} "
-            f"and model {config.embedding_model_name}."
+            f"No documents found in database for years "
+            f"{config.start_year}–{config.end_year}.\n\n"
+            "Likely causes:\n"
+            "- You have not run ingestion yet\n"
+            "- The selected date range has no data\n\n"
+            "Fix:\n"
+            "Run: python -m scripts.run_ingestion"
         )
 
     docs_df["embedding"] = docs_df["embedding"].apply(
