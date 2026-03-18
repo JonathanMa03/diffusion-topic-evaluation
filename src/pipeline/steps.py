@@ -25,16 +25,114 @@ def step_ingestion(config):
 
 def step_embeddings(config):
     print("[STEP] Embeddings")
+
+    import pickle
+    import sqlite3
+
+    import numpy as np
+    import pandas as pd
+    from sentence_transformers import SentenceTransformer
+
     _check_file_exists(config.db_path, "Database")
 
-    print(f"  Using DB: {config.db_path}")
-    print(f"  Embedding model: {config.embedding_model_name}")
-    print("  Status: not implemented yet")
+    conn = sqlite3.connect(config.db_path)
 
-    raise NotImplementedError(
-        "Embedding step is not implemented yet. "
-        "Next action: move notebook 02 embedding pipeline logic into step_embeddings(config)."
+    docs_df = pd.read_sql_query("""
+        SELECT
+            id,
+            clean_text,
+            publication_year
+        FROM documents
+        WHERE publication_year BETWEEN ? AND ?
+        ORDER BY id
+    """, conn, params=[config.start_year, config.end_year])
+
+    if docs_df.empty:
+        conn.close()
+        raise ValueError(
+            f"No documents found in database for years "
+            f"{config.start_year}–{config.end_year}."
+        )
+
+    existing_df = pd.read_sql_query("""
+        SELECT
+            document_id
+        FROM document_embeddings
+        WHERE model_name = ?
+    """, conn, params=[config.embedding_model_name])
+
+    existing_ids = set(existing_df["document_id"].astype(int).tolist())
+
+    missing_df = docs_df[~docs_df["id"].isin(existing_ids)].copy()
+
+    print(f"  Total documents in selected range: {len(docs_df)}")
+    print(f"  Existing embeddings for model {config.embedding_model_name}: {len(existing_ids)}")
+    print(f"  Documents missing embeddings: {len(missing_df)}")
+
+    if missing_df.empty:
+        conn.close()
+        print("  No new embeddings needed.")
+        return
+
+    print(f"  Loading embedding model: {config.embedding_model_name}")
+    model = SentenceTransformer(config.embedding_model_name)
+
+    def serialize_embedding(vec: np.ndarray) -> bytes:
+        return pickle.dumps(vec.astype(np.float32), protocol=pickle.HIGHEST_PROTOCOL)
+
+    batch_size = 64
+    insert_sql = """
+    INSERT INTO document_embeddings (
+        document_id,
+        embedding,
+        model_name
     )
+    VALUES (?, ?, ?)
+    """
+
+    n_total = len(missing_df)
+    n_inserted = 0
+
+    for start in range(0, n_total, batch_size):
+        end = min(start + batch_size, n_total)
+        batch_df = missing_df.iloc[start:end]
+
+        texts = batch_df["clean_text"].tolist()
+        doc_ids = batch_df["id"].tolist()
+
+        if any(not isinstance(t, str) or not t.strip() for t in texts):
+            conn.close()
+            raise ValueError(
+                f"Found empty or invalid clean_text values in embedding batch "
+                f"{start}:{end}."
+            )
+
+        batch_embeddings = model.encode(
+            texts,
+            convert_to_numpy=True,
+            show_progress_bar=False
+        )
+
+        rows_to_insert = [
+            (int(doc_id), serialize_embedding(emb), config.embedding_model_name)
+            for doc_id, emb in zip(doc_ids, batch_embeddings)
+        ]
+
+        conn.executemany(insert_sql, rows_to_insert)
+        conn.commit()
+
+        n_inserted += len(rows_to_insert)
+        print(f"  Inserted batch {start}-{end} | cumulative inserted: {n_inserted}/{n_total}")
+
+    verify_df = pd.read_sql_query("""
+        SELECT COUNT(*) AS n
+        FROM document_embeddings
+        WHERE model_name = ?
+    """, conn, params=[config.embedding_model_name])
+
+    conn.close()
+
+    print(f"  Total embeddings stored for model {config.embedding_model_name}: {verify_df['n'].iloc[0]}")
 
 
 def step_topics(config):
