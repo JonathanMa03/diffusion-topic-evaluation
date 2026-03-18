@@ -1,13 +1,13 @@
 topic_id,topic_label,latest_year,future_sigma,movement_norm,cosine_similarity_to_latest
-0,Public Health & Workforce Impact,2022,0.08,0.29835317,0.92673856
-1,Online Education & Training,2022,0.08,0.16470824,0.98649794
-2,Clinical Virology & Infection,2022,0.08,0.09907587,0.9950043
-3,Medical Imaging & Deep Learning,2022,0.08,0.07265237,0.99740994
-4,Financial Markets & Economic Impact,2022,0.08,0.26454753,0.9718067
-5,Mental Health & Psychological Effects,2022,0.08,0.21109971,0.97121906
-8,Severe Disease & Immune Response,2022,0.08,0.087285966,0.99574643
-9,Food Systems & Hospitality Impact,2022,0.08,0.33908948,0.95566964
-10,"Prevention, Masks & Environmental Effects",2022,0.08,0.21093667,0.9862263
-11,"Policy, Governance & Public Response",2022,0.08,0.28723708,0.93910784
-12,Clinical Care & Procedures,2022,0.08,0.11211713,0.99171406
-14,Hospitalization & Patient Outcomes,2022,0.08,0.18457702,0.97787243
+0,Public Health & Workforce Impact,2022,0.08,0.37209043,0.8827530741691589
+1,Online Education & Training,2022,0.08,0.2571502,0.971996009349823
+2,Clinical Virology & Infection,2022,0.08,0.063907154,0.9978694915771484
+3,Medical Imaging & Deep Learning,2022,0.08,0.103544354,0.9979302883148193
+4,Financial Markets & Economic Impact,2022,0.08,0.3125921,0.9612874388694763
+5,Mental Health & Psychological Effects,2022,0.08,0.25058207,0.9574598670005798
+8,Severe Disease & Immune Response,2022,0.08,0.10386204,0.9939960837364197
+9,Food Systems & Hospitality Impact,2022,0.08,0.33573976,0.9632211327552795
+10,"Prevention, Masks & Environmental Effects",2022,0.08,0.19877023,0.9874994158744812
+11,"Policy, Governance & Public Response",2022,0.08,0.35400295,0.8896100521087646
+12,Clinical Care & Procedures,2022,0.08,0.15318367,0.9854027628898621
+14,Hospitalization & Patient Outcomes,2022,0.08,0.1896831,0.9725251197814941
