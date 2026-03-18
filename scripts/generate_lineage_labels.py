@@ -1,0 +1,265 @@
+from pathlib import Path
+import pandas as pd
+
+RUN_NAME = "2020_2022_broad_biomedical"
+
+output_path = Path(f"runs/{RUN_NAME}/data/lineage_labels.csv")
+output_path.parent.mkdir(parents=True, exist_ok=True)
+
+lineage_specs = {
+    0: ("Medical Imaging & Radiology", [
+        "imaging", "radiology", "xray", "x-ray", "ct", "mri", "ultrasound", "scan", "scans", "diagnostic",
+        "diagnosis", "lesion", "opacity", "nodule", "lung", "thoracic", "chest", "image", "images", "pixel",
+        "segmentation", "classification", "cnn", "deep", "learning", "computer", "vision", "dataset", "annotation", "screening",
+        "detector", "inference", "contrast", "resolution", "slice", "volumetric", "mask", "masked", "radiograph", "radiographic",
+        "tomography", "findings", "report", "reports", "scanner", "feature", "features", "nodules", "biomarker", "lesions",
+        "mammography", "pet", "dicom", "workflow", "triage", "quantification", "detection", "radiologist", "radiologists", "fusion",
+        "modality", "modalities", "imaging-based", "reconstruction", "noise", "denoising", "arterial", "venous", "scanner-based", "bone",
+        "fracture", "pathology", "imaging_data", "ai-assisted", "interpretation", "film", "films", "readout", "cross-sectional", "radiomics",
+        "texture", "voxel", "voxels", "scan-based", "screen", "screens", "imaging_model", "thorax", "pulmonary", "neural",
+        "labeling", "preprocessing", "augmentation", "detectors", "calibration", "monitoring", "bedside", "portable", "imaging_pipeline", "visualization"
+    ]),
+    1: ("Clinical Care & Hospitalization", [
+        "patient", "patients", "clinical", "care", "hospital", "hospitalized", "icu", "ward", "admission", "admissions",
+        "outcome", "outcomes", "severity", "mortality", "discharge", "length", "stay", "bed", "beds", "ventilation",
+        "oxygen", "therapy", "treatment", "protocol", "triage", "symptom", "symptoms", "comorbidity", "comorbidities", "nursing",
+        "physician", "physicians", "clinician", "clinicians", "intubation", "emergency", "department", "monitoring", "followup", "follow-up",
+        "readmission", "inpatient", "outpatient", "consultation", "decision", "decision-making", "trajectory", "deterioration", "recovery", "febrile",
+        "case", "cases", "cohort", "retrospective", "prospective", "bedside", "workflow", "alert", "alerts", "escalation",
+        "support", "supplemental", "steroid", "anticoagulation", "antibiotic", "antibiotics", "renal", "cardiac", "respiratory", "sepsis",
+        "shock", "failure", "organ", "multisystem", "complication", "complications", "progression", "prognosis", "risk", "stratification",
+        "screening", "rounds", "rounding", "documentation", "orders", "survival", "hazard", "hazards", "patient-centered", "hospital-care",
+        "critical", "acute", "clinical-pathway", "intervention", "staffing", "transfer", "transfers", "consult", "consults", "reassessment"
+    ]),
+    2: ("Epidemiology & Transmission", [
+        "epidemiology", "epidemic", "pandemic", "transmission", "spread", "incidence", "prevalence", "reproduction", "r0", "contact",
+        "contacts", "tracing", "surveillance", "outbreak", "cluster", "clusters", "community", "household", "mobility", "movement",
+        "geospatial", "spatial", "temporal", "trend", "trends", "wave", "waves", "forecast", "forecasting", "nowcasting",
+        "exposure", "infectious", "infectivity", "contagion", "importation", "seeding", "diffusion", "population", "demography", "demographic",
+        "hotspot", "hotspots", "network", "networks", "mixing", "mobility_data", "travel", "commuting", "intervention", "nonpharmaceutical",
+        "distancing", "quarantine", "isolation", "mitigation", "attack", "rate", "rates", "attack-rate", "serial", "interval",
+        "generation", "susceptible", "recovered", "exposed", "compartmental", "seir", "sir", "parameter", "parameters", "fitting",
+        "uncertainty", "underreporting", "testing", "ascertainment", "sample", "sampling", "regional", "province", "county", "municipality",
+        "urban", "rural", "density", "households", "interactions", "school", "schools", "workplace", "super-spreader", "event",
+        "events", "dispersion", "heterogeneity", "cross-border", "migration", "imported", "chains", "chain", "epi-curve", "case-counts"
+    ]),
+    3: ("Vaccines & Immunization", [
+        "vaccine", "vaccines", "vaccination", "vaccinated", "immunization", "booster", "boosters", "dose", "doses", "mrna",
+        "viral", "vector", "protein", "subunit", "adjuvant", "neutralizing", "antibody", "antibodies", "titer", "titers",
+        "seroconversion", "immune", "immunity", "protection", "efficacy", "effectiveness", "waning", "durability", "breakthrough", "infection",
+        "schedule", "schedules", "uptake", "hesitancy", "coverage", "rollout", "campaign", "campaigns", "eligibility", "prioritization",
+        "immunogenicity", "reactogenicity", "side-effect", "adverse", "events", "safety", "phase", "trial", "trials", "placebo",
+        "randomized", "participant", "participants", "cohort", "serology", "bcell", "tcell", "memory", "cross-reactive", "variant",
+        "variants", "escape", "protection-level", "correlate", "correlates", "boosting", "dose-interval", "heterologous", "homologous", "primary-series",
+        "public-confidence", "needle", "distribution", "cold-chain", "delivery", "clinic", "pharmacy", "mandate", "certificate", "passport",
+        "eligibility-group", "pediatric", "adult", "older-adults", "pregnancy", "pregnant", "immunocompromised", "high-risk", "coverage-rate", "acceptance",
+        "refusal", "uptake-rate", "reminder", "outreach", "supply", "stock", "allocation", "reservation", "vaccinator", "immunized"
+    ]),
+    4: ("Genomics & Variants", [
+        "genome", "genomic", "sequence", "sequencing", "variant", "variants", "mutation", "mutations", "lineage", "lineages",
+        "phylogeny", "phylogenetic", "strain", "strains", "clade", "clades", "evolution", "evolutionary", "selection", "fitness",
+        "spike", "protein", "binding", "receptor", "ace2", "substitution", "deletion", "insertion", "recombination", "recombinant",
+        "consensus", "assembly", "reads", "read", "alignment", "reference", "annotation", "nucleotide", "amino", "acid",
+        "synonymous", "nonsynonymous", "codon", "haplotype", "haplotypes", "genotype", "genotypes", "sample", "samples", "isolate",
+        "isolates", "metadata", "surveillance", "emergence", "dominance", "frequency", "frequencies", "transmission-advantage", "immune-escape", "adaptation",
+        "within-host", "diversity", "divergence", "clock", "molecular", "tree", "trees", "branch", "branches", "ancestor",
+        "descendant", "cluster", "clusters", "founder", "population-genetics", "selection-pressure", "genome-wide", "orf", "orf1ab", "nsp",
+        "protein-structure", "rbd", "cleavage", "motif", "epitope", "epitopes", "deep-mutational", "tracking", "database", "gisaid",
+        "nextstrain", "surge", "sublineage", "omicron", "delta", "alpha", "beta", "gamma", "monitoring", "screening"
+    ]),
+    5: ("Mental Health & Psychology", [
+        "mental", "health", "psychology", "psychological", "depression", "anxiety", "stress", "burnout", "wellbeing", "well-being",
+        "distress", "coping", "resilience", "loneliness", "isolation", "sleep", "fatigue", "trauma", "grief", "fear",
+        "worry", "uncertainty", "emotion", "emotions", "mood", "moods", "behavior", "behaviour", "survey", "surveys",
+        "questionnaire", "scale", "scores", "screening", "psychiatric", "psychiatry", "therapy", "counseling", "counselling", "support",
+        "student", "students", "worker", "workers", "healthcare", "frontline", "parent", "parents", "child", "children",
+        "adolescent", "adolescents", "older-adults", "adult", "adults", "substance", "alcohol", "suicidal", "suicide", "ideation",
+        "ptsd", "posttraumatic", "coping-style", "social-support", "connectedness", "relationships", "family", "household", "job-loss", "financial-stress",
+        "lockdown", "quarantine", "remote-work", "teletherapy", "self-report", "cross-sectional", "longitudinal", "mediation", "moderation", "predictor",
+        "predictors", "symptom-burden", "quality-of-life", "life-satisfaction", "mindfulness", "intervention", "peer-support", "helpline", "clinical-psychology", "affect",
+        "negative-affect", "positive-affect", "exhaustion", "emotional", "cognitive", "screen-time", "coping-mechanism", "adaptation", "psychosocial", "wellness"
+    ]),
+    6: ("Health Policy & Governance", [
+        "policy", "policies", "governance", "government", "regulation", "regulations", "mandate", "mandates", "guideline", "guidelines",
+        "public", "health", "law", "legal", "ethics", "ethical", "leadership", "decision", "decisions", "compliance",
+        "implementation", "evaluation", "program", "programs", "intervention", "interventions", "response", "preparedness", "capacity", "coordination",
+        "federal", "state", "local", "municipal", "national", "international", "agency", "agencies", "ministry", "ministries",
+        "surge", "resource", "resources", "allocation", "equity", "inequality", "justice", "access", "accountability", "oversight",
+        "communication", "messaging", "public-trust", "institution", "institutions", "bureaucracy", "crisis-management", "rule", "rules", "restriction",
+        "restrictions", "reopening", "closure", "closures", "school-policy", "mask-policy", "testing-policy", "border-policy", "travel-policy", "legislation",
+        "executive", "order", "orders", "advisory", "recommendation", "recommendations", "comparator", "jurisdiction", "governor", "parliament",
+        "stakeholder", "stakeholders", "consultation", "participation", "transparency", "budget", "funding", "emergency-powers", "comparator-country", "implementation-science",
+        "framework", "frameworks", "public-administration", "institutional", "partnership", "cross-sector", "enforcement", "monitoring", "readiness", "preparedness-plan"
+    ]),
+    7: ("Telemedicine & Digital Health", [
+        "telemedicine", "telehealth", "digital", "health", "virtual", "remote", "monitoring", "platform", "platforms", "app",
+        "apps", "mobile", "wearable", "wearables", "sensor", "sensors", "portal", "portals", "ehr", "emr",
+        "record", "records", "video", "visit", "visits", "consultation", "consultations", "triage", "dashboard", "dashboards",
+        "chatbot", "chatbots", "ai", "algorithm", "algorithms", "interoperability", "workflow", "integration", "adoption", "uptake",
+        "patient-portal", "messaging", "asynchronous", "synchronous", "home-monitoring", "alert", "alerts", "self-management", "digital-therapeutics", "mhealth",
+        "ehealth", "connectivity", "broadband", "access", "equity", "implementation", "acceptability", "feasibility", "usability", "user-experience",
+        "engagement", "retention", "compliance", "digital-divide", "privacy", "security", "authentication", "intervention", "remote-care", "appointment",
+        "follow-up", "prescription", "prescriptions", "referral", "screening", "risk-assessment", "symptom-checker", "automation", "documentation", "billing",
+        "reimbursement", "licensure", "provider", "providers", "primary-care", "specialty-care", "telepsychiatry", "teleradiology", "tele-icu", "wearable-data",
+        "home-based", "alerting", "virtual-care", "teleconsult", "remote-patient-monitoring", "digital-workflow", "mobile-health", "decision-support", "interface", "cloud"
+    ]),
+    8: ("Drug Discovery & Therapeutics", [
+        "drug", "drugs", "therapy", "therapies", "treatment", "treatments", "repurposing", "compound", "compounds", "small-molecule",
+        "antiviral", "antivirals", "antibody", "antibodies", "monoclonal", "combination", "dose", "dosing", "pharmacology", "pharmacokinetics",
+        "pharmacodynamics", "toxicity", "safety", "efficacy", "screening", "screen", "library", "libraries", "molecule", "molecules",
+        "target", "targets", "binding", "affinity", "inhibitor", "inhibitors", "agonist", "antagonist", "enzyme", "protein",
+        "pathway", "mechanism", "mechanisms", "host-directed", "viral-entry", "replication", "clearance", "resistance", "synergy", "optimization",
+        "lead", "candidate", "candidates", "medicinal", "chemistry", "docking", "virtual-screening", "assay", "assays", "hit",
+        "hits", "preclinical", "animal", "murine", "hamster", "nonhuman", "primate", "randomized", "placebo", "clinical-trial",
+        "phase1", "phase2", "phase3", "combination-therapy", "outcome", "hospitalization", "symptom-resolution", "recovery", "mortality", "adverse-event",
+        "infusion", "oral", "tablet", "capsule", "formulation", "delivery", "bioavailability", "half-life", "metabolism", "drug-drug",
+        "interaction", "compassionate-use", "investigational", "therapeutic-window", "dose-response", "candidate-selection", "optimization-pipeline", "screening-platform", "bench", "translation"
+    ]),
+    9: ("Social Media & Infodemiology", [
+        "social", "media", "twitter", "facebook", "reddit", "youtube", "misinformation", "disinformation", "infodemic", "rumor",
+        "rumours", "communication", "messaging", "public-opinion", "sentiment", "sentiment-analysis", "hashtag", "hashtags", "post", "posts",
+        "tweet", "tweets", "network", "networks", "engagement", "sharing", "amplification", "echo-chamber", "bot", "bots",
+        "misleading", "content", "information", "trust", "credibility", "fact-checking", "narrative", "narratives", "topic", "topics",
+        "trend", "trends", "text", "texts", "language", "framing", "perception", "belief", "beliefs", "attitude",
+        "attitudes", "vaccine-hesitancy", "conspiracy", "conspiracies", "moderation", "platform-policy", "virality", "viral", "engagement-rate", "retweet",
+        "quote-tweet", "reply", "replies", "comment", "comments", "algorithmic", "recommendation", "feed", "exposure", "digital-trace",
+        "digital-epidemiology", "public-discourse", "polarization", "ideology", "misperception", "monitoring", "tracking", "crowdsourcing", "online-community", "online-behavior",
+        "signal", "signals", "keyword", "keywords", "semantic", "stance", "classification", "content-analysis", "media-ecosystem", "influencer",
+        "followers", "public-awareness", "search", "queries", "google-trends", "web", "blogs", "forum", "forums", "misinfo"
+    ]),
+    10: ("Education & Workforce Training", [
+        "education", "training", "teaching", "learning", "student", "students", "curriculum", "classroom", "online", "remote",
+        "virtual", "workforce", "staff", "staffing", "simulation", "simulation-based", "assessment", "assessments", "competency", "competencies",
+        "faculty", "school", "schools", "medical-student", "resident", "residents", "nursing-student", "workshop", "webinar", "lecture",
+        "lectures", "module", "modules", "instruction", "pedagogy", "e-learning", "hybrid", "placement", "rotation", "rotations",
+        "internship", "clinical-education", "evaluation", "exam", "exams", "performance", "skill", "skills", "professional-development", "continuing-education",
+        "burnout", "preparedness", "capacity-building", "reskilling", "upskilling", "orientation", "onboarding", "cross-training", "competence", "mentorship",
+        "mentor", "supervision", "feedback", "learner", "learners", "attendance", "engagement", "platform", "digital-learning", "distance-learning",
+        "syllabus", "program", "programs", "course", "courses", "case-based", "problem-based", "active-learning", "knowledge", "retention",
+        "instructional-design", "assessment-tool", "faculty-development", "tele-education", "peer-learning", "resilience-training", "module-based", "remote-assessment", "clinical-placement", "adaptation",
+        "simulation-center", "competency-based", "objective-structured", "osce", "faculty-support", "curricular", "learning-loss", "retraining", "workshop-series", "instructional"
+    ]),
+    11: ("Public Health & Prevention", [
+        "public", "health", "prevention", "screening", "testing", "mask", "masks", "ventilation", "hygiene", "sanitation",
+        "disinfection", "community", "awareness", "campaign", "campaigns", "guidance", "education", "outreach", "intervention", "interventions",
+        "behavior-change", "compliance", "risk-communication", "population", "surveillance", "preparedness", "contact-tracing", "testing-site", "rapid-test", "screening-program",
+        "vaccination", "booster", "quarantine", "isolation", "school-based", "workplace-based", "public-space", "travel", "border", "screening-tool",
+        "risk-reduction", "handwashing", "ppe", "personal-protective-equipment", "awareness-campaign", "public-service", "adherence", "mitigation", "community-health", "prevention-strategy",
+        "environmental", "cleaning", "indoor", "air", "filtration", "cohorting", "distancing", "nonpharmaceutical", "prevention-policy", "local-health",
+        "screening-uptake", "preventive", "public-advice", "testing-capacity", "wastewater", "monitor", "monitors", "site", "sites", "prevention-program",
+        "community-screening", "resource-distribution", "equity", "access", "vulnerable", "high-risk", "risk-group", "household-prevention", "masking", "infection-control",
+        "occupational-health", "guideline-adherence", "preventive-care", "community-engagement", "public-information", "social-marketing", "preparedness-plan", "local-response", "public-campaign", "community-outreach",
+        "mass-communication", "monitoring-system", "testing-access", "prevention-outcome", "barrier", "facilitator", "prevention-behavior", "protective-behavior", "behavioral-intervention", "health-promotion"
+    ]),
+    12: ("Health Economics & Markets", [
+        "economic", "economics", "market", "markets", "financial", "finance", "cost", "costs", "spending", "expenditure",
+        "budget", "budgets", "insurance", "reimbursement", "demand", "supply", "price", "prices", "pricing", "labor",
+        "employment", "unemployment", "income", "inequality", "poverty", "consumption", "investment", "productivity", "shock", "volatility",
+        "stock", "stocks", "returns", "risk", "portfolio", "asset", "assets", "firm", "firms", "industry",
+        "industries", "trade", "gdp", "macro", "micro", "household", "households", "spending-patterns", "benefit", "benefits",
+        "fiscal", "monetary", "stimulus", "recovery", "recession", "inflation", "wage", "wages", "mobility", "business",
+        "closure", "closures", "hospitality", "tourism", "consumer", "consumers", "demand-shock", "supply-shock", "valuation", "forecast",
+        "forecasts", "forecasting", "economic-model", "scenario", "policy-cost", "cost-effectiveness", "resource-allocation", "efficiency", "equilibrium", "credit",
+        "banking", "market-reaction", "abnormal-returns", "investor", "investors", "exchange", "exchanges", "bond", "bonds", "liquidity",
+        "household-income", "employment-loss", "sector", "sectors", "procurement", "pricing-policy", "payment", "coverage", "out-of-pocket", "economic-burden"
+    ]),
+    13: ("Primary Care & Chronic Disease", [
+        "primary", "care", "chronic", "disease", "diabetes", "hypertension", "cardiovascular", "asthma", "copd", "kidney",
+        "renal", "cancer", "oncology", "screening", "management", "followup", "medication", "continuity", "ambulatory", "clinic",
+        "clinics", "appointment", "appointments", "telehealth", "access", "referral", "specialist", "comorbidity", "prevention", "lifestyle",
+        "obesity", "nutrition", "exercise", "self-management", "adherence", "monitoring", "biomarker", "symptom", "progression", "outpatient",
+        "care-pathway", "care-coordination", "general-practice", "family-medicine", "chronic-care", "multimorbidity", "risk-factor", "screening-gap", "service-delivery", "community-clinic",
+        "underdiagnosis", "undertreatment", "follow-up", "routine-care", "preventive-care", "continuity-of-care", "disease-burden", "quality-metric", "blood-pressure", "glycemic",
+        "insulin", "medication-refill", "care-gap", "backlog", "screening-program", "delayed-care", "access-barrier", "specialty-referral", "patient-navigation", "checkup",
+        "ambulatory-care", "comprehensive-care", "preexisting", "noncommunicable", "care-model", "integrated-care", "family-physician", "care-team", "panel-management", "long-term",
+        "maintenance", "care-delivery", "followup-visit", "primary-care-provider", "disease-management", "chronic-condition", "disease-control", "preventive-screening", "screening-delay", "service-use",
+        "quality-of-care", "routine-monitoring", "continuity", "population-health", "care-utilization", "outpatient-management", "shared-decision-making", "case-management", "care-access", "clinical-management"
+    ]),
+    14: ("Microbiology & Laboratory Science", [
+        "microbiology", "laboratory", "lab", "assay", "assays", "culture", "cultures", "pcr", "rt-pcr", "qpcr",
+        "diagnostic", "diagnostics", "sample", "samples", "specimen", "specimens", "swab", "serology", "antigen", "antigens",
+        "antibody", "antibodies", "validation", "sensitivity", "specificity", "limit-of-detection", "workflow", "protocol", "reagent", "reagents",
+        "contamination", "biosafety", "extraction", "isolation", "amplification", "quantification", "primer", "primers", "probe", "probes",
+        "processing", "throughput", "batch", "batches", "quality-control", "qc", "calibration", "cross-reactivity", "false-positive", "false-negative",
+        "serum", "plasma", "blood", "urine", "saliva", "nasopharyngeal", "oropharyngeal", "stool", "sample-handling", "transport",
+        "storage", "stability", "freeze-thaw", "reference-standard", "kit", "kits", "laboratory-developed", "workflow-optimization", "reproducibility", "interlaboratory",
+        "quality-assurance", "viability", "cfu", "microscopy", "microscope", "staining", "chromatography", "spectrometry", "elisa", "western-blot",
+        "neutralization", "titre", "titer", "sample-integrity", "analytic", "analytical", "benchmark", "comparison", "rapid-diagnostic", "point-of-care",
+        "turnaround", "laboratory-network", "automation", "instrument", "instruments", "workflow-design", "lab-capacity", "validation-study", "control-sample", "standardization"
+    ]),
+    15: ("Biostatistics & Methods", [
+        "statistical", "statistics", "model", "models", "method", "methods", "analysis", "inference", "regression", "classification",
+        "prediction", "forecasting", "bayesian", "frequentist", "likelihood", "posterior", "prior", "sample", "sampling", "estimation",
+        "uncertainty", "interval", "confidence", "credible", "hazard", "survival", "cox", "mixed-effects", "random-effects", "fixed-effects",
+        "propensity", "matching", "causal", "mediation", "moderation", "interaction", "covariate", "covariates", "confounding", "bias",
+        "missingness", "imputation", "validation", "cross-validation", "bootstrap", "resampling", "simulation", "sensitivity-analysis", "robustness", "identification",
+        "nonparametric", "semiparametric", "time-series", "longitudinal", "panel", "hierarchical", "multilevel", "clustered", "correlation", "variance",
+        "standard-error", "mse", "mae", "auc", "roc", "precision", "recall", "f1", "calibration", "discrimination",
+        "benchmarking", "experimental-design", "trial-design", "power", "sample-size", "consistency", "asymptotic", "finite-sample", "regularization", "lasso",
+        "ridge", "elastic-net", "trees", "forest", "boosting", "neural", "embedding", "dimensionality-reduction", "pca", "umap",
+        "hdbscan", "topic-model", "clustering", "mixture", "posterior-predictive", "decision-theory", "evaluation-metric", "protocol-analysis", "algorithm", "workflow"
+    ]),
+    16: ("Environmental & Air Quality", [
+        "environment", "environmental", "air", "quality", "pollution", "aerosol", "aerosols", "particle", "particles", "ventilation",
+        "filtration", "indoor", "outdoor", "climate", "weather", "temperature", "humidity", "seasonality", "surface", "surfaces",
+        "wastewater", "water", "sewage", "monitoring", "surveillance", "exposure", "occupational", "built-environment", "indoor-air", "airflow",
+        "dispersion", "droplet", "droplets", "transmission", "hvac", "filter", "filters", "co2", "carbon-dioxide", "indoor-monitoring",
+        "particulate", "pm2_5", "pm10", "emissions", "urban", "rural", "environmental-health", "ventilation-rate", "air-cleaner", "purifier",
+        "room", "rooms", "school-building", "office", "public-transport", "transport", "exhalation", "breathing", "masking", "exposure-assessment",
+        "meteorology", "dispersion-model", "airborne", "environmental-sampling", "surface-sampling", "contamination", "fomite", "cleaning", "decontamination", "building",
+        "occupancy", "crowding", "indoor-risk", "environmental-monitoring", "ambient", "weather-pattern", "seasonal", "pollutant", "pollutants", "monitor",
+        "sensor", "sensors", "real-time", "wastewater-based", "community-surveillance", "green-space", "ventilation-intervention", "exposure-model", "air-exchange", "filtration-efficiency",
+        "ultraviolet", "uv", "germicidal", "sanitation", "environmental-burden", "occupational-exposure", "air-quality-index", "iaq", "microclimate", "environmental-control"
+    ]),
+    17: ("Pediatrics & Maternal Health", [
+        "pediatric", "pediatrics", "child", "children", "infant", "infants", "adolescent", "adolescents", "maternal", "pregnancy",
+        "pregnant", "neonatal", "newborn", "delivery", "birth", "obstetric", "obstetrics", "maternal-health", "postpartum", "prenatal",
+        "school", "schools", "family", "families", "caregiver", "caregivers", "breastfeeding", "vaccination", "pediatric-care", "development",
+        "growth", "nutrition", "mental-health", "education", "screening", "immunization", "infection", "symptom", "symptoms", "hospitalization",
+        "nicu", "picu", "admission", "outcomes", "maternal-outcome", "fetal", "placenta", "perinatal", "gestation", "gestational",
+        "child-health", "school-health", "vaccination-uptake", "parental", "parent", "parents", "household", "adolescent-health", "pediatric-patient", "pediatric-outcome",
+        "multisystem-inflammatory", "mis-c", "neonate", "newborns", "prenatal-care", "antenatal", "labor", "delivery-room", "pediatric-clinic", "childhood",
+        "mother", "mothers", "maternal-anxiety", "birth-outcome", "neonatal-outcome", "school-closure", "remote-learning", "child-wellbeing", "family-stress", "parenting",
+        "immunization-schedule", "pediatric-vaccine", "pediatric-screening", "maternal-screening", "peripartum", "infant-feeding", "child-development", "school-return", "adolescent-behavior", "child-mental-health",
+        "mother-infant", "maternal-care", "reproductive-health", "obgyn", "pediatric-hospital", "developmental", "childcare", "care-seeking", "maternal-support", "school-based-care"
+    ]),
+    18: ("Global Health & Equity", [
+        "global", "health", "equity", "inequity", "inequality", "access", "disparity", "disparities", "resource", "resources",
+        "low-income", "middle-income", "lmic", "capacity", "humanitarian", "vulnerable", "marginalized", "underserved", "coverage", "universal",
+        "community", "international", "cross-country", "country", "countries", "regional", "africa", "asia", "latin-america", "rural",
+        "urban", "minority", "race", "racial", "ethnicity", "ethnic", "socioeconomic", "poverty", "deprivation", "housing",
+        "food-security", "education", "digital-divide", "gender", "women", "men", "migration", "migrant", "refugee", "refugees",
+        "indigenous", "tribal", "remote-area", "health-system", "workforce", "financing", "service-delivery", "barrier", "barriers", "facilitator",
+        "facilitators", "inclusion", "justice", "fairness", "representation", "participation", "trust", "acceptability", "feasibility", "scaling",
+        "implementation", "program", "programs", "aid", "donor", "supply-chain", "procurement", "vaccine-equity", "testing-equity", "health-rights",
+        "structural", "determinant", "determinants", "social-determinants", "community-engagement", "local-capacity", "partnership", "global-response", "health-gap", "service-gap",
+        "care-gap", "measurement", "coverage-gap", "distribution", "allocation", "public-financing", "subnational", "cross-national", "accessibility", "equitable"
+    ]),
+    19: ("Bioinformatics & Computational Biology", [
+        "bioinformatics", "computational", "biology", "pipeline", "pipelines", "workflow", "workflows", "alignment", "assembly", "annotation",
+        "database", "databases", "sequence", "sequences", "protein", "proteins", "structure", "structures", "docking", "simulation",
+        "molecular", "dynamics", "network", "pathway", "gene", "genes", "expression", "transcriptomics", "proteomics", "metabolomics",
+        "systems-biology", "single-cell", "bulk-rna", "analysis", "clustering", "dimensionality-reduction", "umap", "tsne", "pca", "embedding",
+        "prediction", "classifier", "classifiers", "benchmark", "benchmarking", "feature", "features", "selection", "regularization", "modeling",
+        "algorithm", "algorithms", "optimization", "scoring", "motif", "motifs", "domain", "domains", "binding-site", "epitope",
+        "epitopes", "comparative", "ortholog", "homolog", "homology", "fold", "folding", "differential-expression", "enrichment", "ontology",
+        "go", "kegg", "visualization", "heatmap", "network-analysis", "graph", "graphs", "signal", "signals", "multi-omics",
+        "integration", "curation", "repository", "reproducibility", "notebook", "container", "software", "package", "packages", "api",
+        "command-line", "automation", "high-throughput", "screen", "screens", "computational-model", "prediction-tool", "benchmark-dataset", "resource", "resources"
+    ]),
+}
+
+rows = []
+for lineage_id, (lineage_name, terms) in lineage_specs.items():
+    rows.append({
+        "lineage_id": lineage_id,
+        "lineage_name": f"Lineage {lineage_id}: {lineage_name}",
+        "top_terms": "; ".join(terms),
+        "n_terms": len(terms),
+    })
+
+df = pd.DataFrame(rows)
+df.to_csv(output_path, index=False)
+
+print(f"Saved {len(df)} artificial lineage label rows to {output_path.resolve()}")
+print(df.head(3).to_string(index=False))

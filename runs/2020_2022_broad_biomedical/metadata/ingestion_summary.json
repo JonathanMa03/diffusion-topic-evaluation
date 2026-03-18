@@ -7,9 +7,9 @@
   "pmids_collected": 1000,
   "raw_records": 964,
   "cleaned_records": 915,
-  "rows_before_insert": 2437,
+  "rows_before_insert": 3193,
   "rows_after_insert": 3193,
-  "rows_newly_added": 756,
+  "rows_newly_added": 0,
   "year_counts": {
     "2020": 482,
     "2021": 314,

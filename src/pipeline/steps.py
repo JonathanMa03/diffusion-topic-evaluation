@@ -830,6 +830,55 @@ def step_topics(config):
         raise ValueError("Lineage dataframe is empty after topic processing.")
 
     print(f"  Final lineage rows: {len(lineage_df)}")
+        # build topic trajectories from lineage + centroids
+    topic_trajectories = {}
+
+    centroids_lookup = {}
+    for _, row in centroids_df.iterrows():
+        centroids_lookup[(int(row["publication_year"]), int(row["cluster_id"]))] = row["centroid"]
+
+    for lineage_id, group in lineage_df.groupby("lineage_id"):
+        group = group.sort_values("year")
+
+        years_seq = []
+        trajectory_seq = []
+
+        for _, row in group.iterrows():
+            year = int(row["year"])
+            cluster_id = int(row["cluster_id"])
+
+            key = (year, cluster_id)
+            if key not in centroids_lookup:
+                continue
+
+            years_seq.append(year)
+            trajectory_seq.append(np.asarray(centroids_lookup[key], dtype=np.float32))
+
+        if len(years_seq) == 0:
+            continue
+
+        topic_trajectories[int(lineage_id)] = {
+            "years": years_seq,
+            "trajectory": trajectory_seq,
+            "label": f"Lineage {int(lineage_id)}",
+        }
+
+    if not topic_trajectories:
+        raise ValueError("Topic trajectories could not be built from lineage and centroids.")
+
+    topic_trajectories_path = config.data_path / "topic_trajectories.pkl"
+    run_topic_trajectories_path = run_data_dir / "topic_trajectories.pkl"
+
+    with open(topic_trajectories_path, "wb") as f:
+        pickle.dump(topic_trajectories, f)
+
+    with open(run_topic_trajectories_path, "wb") as f:
+        pickle.dump(topic_trajectories, f)
+
+    print(f"  Saved shared topic trajectories to: {topic_trajectories_path}")
+    print(f"  Saved run-specific topic trajectories to: {run_topic_trajectories_path}")
+
+    print(f"  Built {len(topic_trajectories)} topic trajectories")
     print("  Topic artifacts saved successfully")
 
 

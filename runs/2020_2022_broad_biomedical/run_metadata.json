@@ -1,0 +1,14 @@
+{
+  "run_name": "2020_2022_broad_biomedical",
+  "start_year": 2020,
+  "end_year": 2022,
+  "pubmed_query": "",
+  "embedding_model_name": "all-MiniLM-L6-v2",
+  "topic_model_name": "kmeans_all-MiniLM-L6-v2_k15",
+  "hdbscan_min_cluster_size": 5,
+  "hdbscan_min_samples": 2,
+  "started_at": "2026-03-18T17:24:39.739569",
+  "status": "completed",
+  "failed_stage": null,
+  "finished_at": "2026-03-18T17:25:18.038103"
+}
