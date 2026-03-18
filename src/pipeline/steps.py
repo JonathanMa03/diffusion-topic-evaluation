@@ -84,8 +84,11 @@ def step_ingestion(config):
     ncbi_email = "REMOVED_EMAIL"   # replace later if desired
     ncbi_api_key = None
 
-    # Current project query from notebook work
-    pubmed_query = f'("covid-19"[Title/Abstract]) AND {config.start_year}:{config.end_year}[pdat]'
+    # General PubMed query logic
+    if config.pubmed_query.strip():
+        pubmed_query = f"({config.pubmed_query}) AND {config.start_year}:{config.end_year}[pdat]"
+    else:
+        pubmed_query = f"{config.start_year}:{config.end_year}[pdat]"
 
     search_page_size = 200
     fetch_batch_size = 25

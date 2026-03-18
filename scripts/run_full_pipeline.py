@@ -3,7 +3,13 @@ from src.pipeline.run_pipeline import run_full_pipeline
 
 
 def main():
-    config = build_config(start_year=2020, end_year=2022)
+    # blank pubmed_query = broad biomedical literature in the selected range
+    config = build_config(
+        start_year=2020,
+        end_year=2022,
+        pubmed_query="",
+    )
+
     success = run_full_pipeline(config)
 
     if not success:

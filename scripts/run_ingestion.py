@@ -3,7 +3,12 @@ from src.pipeline.steps import step_ingestion
 
 
 def main():
-    config = build_config(start_year=2020, end_year=2022)
+    # blank pubmed_query = broad biomedical literature in the selected range
+    config = build_config(
+        start_year=2020,
+        end_year=2022,
+        pubmed_query="",
+    )
 
     try:
         step_ingestion(config)

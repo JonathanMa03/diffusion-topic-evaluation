@@ -19,8 +19,14 @@ class PipelineConfig:
     hdbscan_min_cluster_size: int = 5
     hdbscan_min_samples: int = 2
 
+    pubmed_query: str = ""
 
-def build_config(start_year: int, end_year: int) -> PipelineConfig:
+
+def build_config(
+    start_year: int,
+    end_year: int,
+    pubmed_query: str = "",
+) -> PipelineConfig:
     project_root = Path.cwd().resolve()
 
     return PipelineConfig(
@@ -31,4 +37,5 @@ def build_config(start_year: int, end_year: int) -> PipelineConfig:
         data_path=project_root / "data",
         outputs_path=project_root / "outputs",
         logs_path=project_root / "logs",
+        pubmed_query=pubmed_query,
     )

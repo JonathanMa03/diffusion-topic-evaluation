@@ -142,7 +142,7 @@ if topic_trajectories is not None and not future_df.empty:
                 continue
 
             label = group["label"].iloc[0]
-            movement = float(group["movement_norm"].iloc[0])
+            movement = float(group["movement_norm"].iloc[0]) if not pd.isna(group["movement_norm"].iloc[0]) else 0.0
 
             x = group["x"].values
             y = group["y"].values
@@ -256,7 +256,7 @@ if not lineage_df.empty:
         + "Cluster ID: " + lineage_plot_df["cluster_id"].astype(str) + "<br>"
         + "Docs in node: " + lineage_plot_df["n_docs"].astype(str) + "<br>"
         + "Total docs in lineage: " + lineage_plot_df["total_docs"].astype(str) + "<br>"
-        + "Status: " + lineage_plot_df["status"].astype(str)
+        + "Status: " + lineage_plot_df["status"].str.replace("_", " ")
     )
 
     status_colors = {
@@ -331,8 +331,8 @@ if not lineage_df.empty:
         margin=dict(l=20, r=20, t=60, b=20),
         legend_title="Lineage",
         xaxis=dict(
-            tickmode="array",
-            tickvals=sorted(lineage_plot_df["year"].unique())
+            title="Year",
+            dtick=1
         )
     )
 
@@ -429,7 +429,7 @@ app.layout = html.Div(
                         html.Div(
                             style={"padding": "24px 8px"},
                             children=[
-                                html.H2("Topic Trajectories"),
+                                html.H2(f"Top {top_k} Topic Trajectories"),
                                 dcc.Graph(figure=pca_fig) if pca_fig is not None else html.P(
                                     "No trajectory data available yet."
                                 ),
