@@ -1,9 +1,12 @@
 from pathlib import Path
 import pickle
 
+import numpy as np
 import pandas as pd
 from dash import Dash, html, dcc
 import plotly.express as px
+import plotly.graph_objects as go
+from sklearn.decomposition import PCA
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,12 +18,25 @@ TRAJ_PATH = DATA_PATH / "topic_trajectories.pkl"
 LINEAGE_PATH = DATA_PATH / "hdbscan_lineage.csv"
 
 app = Dash(__name__)
-app.title = "Diffusion Topic Dashboard"
+app.title = "How Has Biomedical Research Evolved Over Time?"
 
 
 def load_future_df() -> pd.DataFrame:
     if FUTURE_MOVEMENT_PATH.exists():
         return pd.read_csv(FUTURE_MOVEMENT_PATH)
+    return pd.DataFrame()
+
+
+def load_trajectories():
+    if TRAJ_PATH.exists():
+        with open(TRAJ_PATH, "rb") as f:
+            return pickle.load(f)
+    return None
+
+
+def load_lineage_df() -> pd.DataFrame:
+    if LINEAGE_PATH.exists():
+        return pd.read_csv(LINEAGE_PATH)
     return pd.DataFrame()
 
 
@@ -33,10 +49,15 @@ def artifact_status() -> dict:
 
 
 future_df = load_future_df()
+topic_trajectories = load_trajectories()
+lineage_df = load_lineage_df()
 status = artifact_status()
 
 movement_fig = None
 cosine_fig = None
+pca_fig = None
+lineage_fig = None
+
 
 if not future_df.empty:
     movement_fig = px.bar(
@@ -44,7 +65,7 @@ if not future_df.empty:
         x="movement_norm",
         y="topic_label",
         orientation="h",
-        title="Predicted 2023 Topic Movement (Neural Denoiser)",
+        title="Possible Trends Next Year",
         labels={
             "movement_norm": "Predicted movement norm",
             "topic_label": "Topic",
@@ -61,9 +82,9 @@ if not future_df.empty:
         x="cosine_similarity_to_latest",
         y="topic_label",
         orientation="h",
-        title="Predicted 2023 Stability Relative to 2022",
+        title="Stable Topics from Last Year",
         labels={
-            "cosine_similarity_to_latest": "Cosine similarity to 2022 state",
+            "cosine_similarity_to_latest": "Cosine similarity to last year state",
             "topic_label": "Topic",
         },
     )
@@ -71,6 +92,248 @@ if not future_df.empty:
         template="plotly_white",
         height=650,
         margin=dict(l=20, r=20, t=60, b=20),
+    )
+
+
+if topic_trajectories is not None and not future_df.empty:
+    movement_lookup = future_df.set_index("topic_id")["movement_norm"].to_dict()
+
+    top_k = 8
+    top_topic_ids = (
+        future_df.sort_values("movement_norm", ascending=False)
+        .head(top_k)["topic_id"]
+        .tolist()
+    )
+
+    all_points = []
+    meta = []
+
+    for topic_id, info in topic_trajectories.items():
+        traj = info["trajectory"]
+        years = info["years"]
+        label = info["label"]
+
+        for i, year in enumerate(years):
+            all_points.append(traj[i])
+            meta.append({
+                "topic_id": topic_id,
+                "label": label,
+                "year": year,
+                "movement_norm": movement_lookup.get(topic_id, np.nan),
+            })
+
+    if len(all_points) > 0:
+        X_all = np.vstack(all_points)
+        meta_df = pd.DataFrame(meta)
+
+        pca = PCA(n_components=2)
+        X_2d = pca.fit_transform(X_all)
+
+        meta_df["x"] = X_2d[:, 0]
+        meta_df["y"] = X_2d[:, 1]
+
+        top_meta_df = meta_df[meta_df["topic_id"].isin(top_topic_ids)].copy()
+
+        pca_fig = go.Figure()
+
+        for topic_id in top_topic_ids:
+            group = top_meta_df[top_meta_df["topic_id"] == topic_id].sort_values("year")
+            if group.empty:
+                continue
+
+            label = group["label"].iloc[0]
+            movement = float(group["movement_norm"].iloc[0])
+
+            x = group["x"].values
+            y = group["y"].values
+
+            pca_fig.add_trace(go.Scatter(
+                x=x,
+                y=y,
+                mode="lines",
+                name=label,
+                line=dict(width=2 + 2.5 * movement),
+                hoverinfo="skip"
+            ))
+
+            marker_sizes = np.linspace(8, 14, len(x)).tolist()
+
+            pca_fig.add_trace(go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                showlegend=False,
+                marker=dict(size=marker_sizes),
+                customdata=group[["year"]].values,
+                hovertemplate=(
+                    f"<b>{label}</b><br>"
+                    "Year: %{customdata[0]}<br>"
+                    "PC1: %{x:.3f}<br>"
+                    "PC2: %{y:.3f}<br>"
+                    f"Movement norm: {movement:.3f}<extra></extra>"
+                ),
+            ))
+
+            for j in range(len(x) - 1):
+                pca_fig.add_annotation(
+                    x=x[j + 1],
+                    y=y[j + 1],
+                    ax=x[j],
+                    ay=y[j],
+                    xref="x",
+                    yref="y",
+                    axref="x",
+                    ayref="y",
+                    showarrow=True,
+                    arrowhead=3,
+                    arrowsize=1.1,
+                    arrowwidth=1.4,
+                    opacity=0.7
+                )
+
+        pca_fig.update_layout(
+            title="Top 8 Topic Trajectories (PCA Projection)",
+            xaxis_title="PC1",
+            yaxis_title="PC2",
+            template="plotly_white",
+            height=800,
+            margin=dict(l=20, r=20, t=60, b=20),
+            legend_title="Topic",
+        )
+
+
+if not lineage_df.empty:
+    lineage_summary = (
+        lineage_df.groupby("lineage_id")
+        .agg(
+            start_year=("year", "min"),
+            end_year=("year", "max"),
+            n_years=("year", "nunique"),
+            total_docs=("n_docs", "sum"),
+        )
+        .reset_index()
+    )
+
+    min_year = lineage_df["year"].min()
+    max_year = lineage_df["year"].max()
+    
+    def classify_lineage(row):
+        if row["n_years"] >= 2:
+            return "persistent"
+        elif row["end_year"] == row["start_year"] == min_year:
+            return "early_only"
+        elif row["end_year"] == row["start_year"] == max_year:
+            return "late_only"
+        else:
+            return "other"
+
+    lineage_summary["status"] = lineage_summary.apply(classify_lineage, axis=1)
+
+    lineage_name_df = pd.DataFrame({
+    "lineage_id": sorted(lineage_df["lineage_id"].unique())
+    })
+    lineage_name_df["lineage_name"] = lineage_name_df["lineage_id"].apply(
+        lambda x: f"Lineage {int(x)}"
+    )
+
+    lineage_plot_df = lineage_df.merge(
+        lineage_summary[["lineage_id", "status", "total_docs"]],
+        on="lineage_id",
+        how="left"
+    ).merge(
+        lineage_name_df,
+        on="lineage_id",
+        how="left"
+    )
+
+    lineage_plot_df["lineage_name"] = lineage_plot_df["lineage_name"].fillna(
+        lineage_plot_df["lineage_id"].apply(lambda x: f"Lineage {int(x)}")
+    )
+
+    lineage_plot_df["hover_text"] = (
+        "<b>" + lineage_plot_df["lineage_name"] + "</b><br>"
+        + "Year: " + lineage_plot_df["year"].astype(str) + "<br>"
+        + "Cluster ID: " + lineage_plot_df["cluster_id"].astype(str) + "<br>"
+        + "Docs in node: " + lineage_plot_df["n_docs"].astype(str) + "<br>"
+        + "Total docs in lineage: " + lineage_plot_df["total_docs"].astype(str) + "<br>"
+        + "Status: " + lineage_plot_df["status"].astype(str)
+    )
+
+    status_colors = {
+        "persistent": "blue",
+        "death": "red",
+        "birth": "green",
+        "other": "gray",
+}
+
+    lineage_fig = go.Figure()
+
+    for lineage_id, group in lineage_plot_df.groupby("lineage_id"):
+        group = group.sort_values("year")
+
+        status_name = group["status"].iloc[0]
+        color = status_colors.get(status_name, "gray")
+        lineage_name = group["lineage_name"].iloc[0]
+
+        x = group["year"].values
+        y = [lineage_id] * len(group)
+
+        short_name = lineage_name.split(":")[0]
+
+        lineage_fig.add_trace(go.Scatter(
+            x=x,
+            y=y,
+            mode="lines",
+            name=short_name,
+            line=dict(color=color, width=3 if status_name == "persistent" else 2),
+            hoverinfo="skip"
+        ))
+
+        lineage_fig.add_trace(go.Scatter(
+            x=x,
+            y=y,
+            mode="markers+text",
+            showlegend=False,
+            text=[f"n={n}" for n in group["n_docs"]],
+            textposition="top center",
+            hovertext=group["hover_text"],
+            hoverinfo="text",
+            marker=dict(
+                color=color,
+                size=group["n_docs"] * 0.45 + 10,
+                line=dict(color="black", width=0.5)
+            )
+        ))
+
+        for i in range(len(x) - 1):
+            lineage_fig.add_annotation(
+                x=x[i + 1],
+                y=y[i + 1],
+                ax=x[i],
+                ay=y[i],
+                xref="x",
+                yref="y",
+                axref="x",
+                ayref="y",
+                showarrow=True,
+                arrowhead=3,
+                arrowsize=1.2,
+                arrowwidth=1.5,
+                opacity=0.7
+            )
+
+    lineage_fig.update_layout(
+        title="Interactive Dynamic Topic Lineages (HDBSCAN + Semantic Labels)",
+        xaxis_title="Year",
+        yaxis_title="Lineage ID",
+        template="plotly_white",
+        height=750,
+        margin=dict(l=20, r=20, t=60, b=20),
+        legend_title="Lineage",
+        xaxis=dict(
+            tickmode="array",
+            tickvals=sorted(lineage_plot_df["year"].unique())
+        )
     )
 
 
@@ -96,48 +359,99 @@ app.layout = html.Div(
     children=[
         html.H1("Diffusion Topic Evolution Dashboard"),
         html.P(
-            "Interactive view of topic movement, topic stability, and later "
-            "trajectory and lineage structure."
+            "Interactive view of topic movement, topic stability, trajectory geometry, "
+            "and lineage structure."
         ),
 
-        html.H2("Current Status"),
-        html.Div(
-            [
-                html.Div(
-                    [
-                        html.Div(f"Outputs path: {OUTPUTS_PATH}"),
-                        html.Div(f"Data path: {DATA_PATH}"),
+        dcc.Tabs(
+            children=[
+                dcc.Tab(
+                    label="Overview",
+                    children=[
+                        html.Div(
+                            style={"padding": "24px 8px"},
+                            children=[
+                                html.H2("Current Status"),
+                                html.Div(
+                                    [
+                                        html.Div(
+                                            [
+                                                html.Div(f"Outputs path: {OUTPUTS_PATH}"),
+                                                html.Div(f"Data path: {DATA_PATH}"),
+                                            ],
+                                            style={"marginBottom": "12px"},
+                                        ),
+                                        status_badge("Future movement CSV", status["future_movement"]),
+                                        status_badge("Topic trajectories PKL", status["trajectories"]),
+                                        status_badge("HDBSCAN lineage CSV", status["lineage"]),
+                                    ],
+                                    style={
+                                        "padding": "16px",
+                                        "border": "1px solid #ddd",
+                                        "borderRadius": "10px",
+                                        "backgroundColor": "#fafafa",
+                                        "marginBottom": "24px",
+                                    },
+                                ),
+                                html.H2("About"),
+                                html.P(
+                                    "This dashboard summarizes topic evolution in biomedical "
+                                    "literature using clustering, trajectory analysis, and diffusion-based "
+                                    "forecasting."
+                                ),
+                            ],
+                        )
                     ],
-                    style={"marginBottom": "12px"},
                 ),
-                status_badge("Future movement CSV", status["future_movement"]),
-                status_badge("Topic trajectories PKL", status["trajectories"]),
-                status_badge("HDBSCAN lineage CSV", status["lineage"]),
-            ],
-            style={
-                "padding": "16px",
-                "border": "1px solid #ddd",
-                "borderRadius": "10px",
-                "backgroundColor": "#fafafa",
-                "marginBottom": "24px",
-            },
-        ),
 
-        html.H2("Predicted Topic Movement"),
-        dcc.Graph(figure=movement_fig) if movement_fig is not None else html.P(
-            "No future movement data available yet."
-        ),
+                dcc.Tab(
+                    label="Movement & Stability",
+                    children=[
+                        html.Div(
+                            style={"padding": "24px 8px"},
+                            children=[
+                                html.H2("Predicted Topic Movement"),
+                                dcc.Graph(figure=movement_fig) if movement_fig is not None else html.P(
+                                    "No future movement data available yet."
+                                ),
+                                html.H2("Predicted Topic Stability"),
+                                dcc.Graph(figure=cosine_fig) if cosine_fig is not None else html.P(
+                                    "No cosine similarity data available yet."
+                                ),
+                            ],
+                        )
+                    ],
+                ),
 
-        html.H2("Predicted Topic Stability"),
-        dcc.Graph(figure=cosine_fig) if cosine_fig is not None else html.P(
-            "No cosine similarity data available yet."
-        ),
+                dcc.Tab(
+                    label="PCA Trajectories",
+                    children=[
+                        html.Div(
+                            style={"padding": "24px 8px"},
+                            children=[
+                                html.H2("Topic Trajectories"),
+                                dcc.Graph(figure=pca_fig) if pca_fig is not None else html.P(
+                                    "No trajectory data available yet."
+                                ),
+                            ],
+                        )
+                    ],
+                ),
 
-        html.H2("Coming Next"),
-        html.Ul(
-            [
-                html.Li("Interactive PCA topic trajectories"),
-                html.Li("Interactive HDBSCAN lineage evolution"),
+                dcc.Tab(
+                    label="Topic Lineages",
+                    children=[
+                        html.Div(
+                            style={"padding": "24px 8px"},
+                            children=[
+                                html.H2("Topic Lineages"),
+                                dcc.Graph(figure=lineage_fig) if lineage_fig is not None else html.P(
+                                    "No lineage data available yet."
+                                ),
+                            ],
+                        )
+                    ],
+                ),
             ]
         ),
     ],
