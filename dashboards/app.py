@@ -48,12 +48,20 @@ def load_lineage_df(run_name: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def load_lineage_labels_df(run_name: str) -> pd.DataFrame:
+    path = RUNS_PATH / run_name / "data" / "lineage_labels.csv"
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
+
+
 def artifact_status(run_name: str) -> dict:
     run_dir = RUNS_PATH / run_name
     return {
         "future_movement": (run_dir / "data" / "future_topic_movement.csv").exists(),
         "trajectories": (run_dir / "data" / "topic_trajectories.pkl").exists(),
         "lineage": (run_dir / "data" / "hdbscan_lineage.csv").exists(),
+        "lineage_labels": (run_dir / "data" / "lineage_labels.csv").exists(),
         "metadata": (run_dir / "run_metadata.json").exists(),
     }
 
@@ -74,6 +82,40 @@ def build_figures(run_name: str):
     future_df = load_future_df(run_name)
     topic_trajectories = load_trajectories(run_name)
     lineage_df = load_lineage_df(run_name)
+    lineage_labels_df = load_lineage_labels_df(run_name)
+    lineage_name_map = {}
+    if (
+        not lineage_labels_df.empty
+        and {"lineage_id", "lineage_name"}.issubset(lineage_labels_df.columns)
+    ):
+        lineage_labels_df = lineage_labels_df.copy()
+        lineage_labels_df["lineage_id"] = lineage_labels_df["lineage_id"].astype(int)
+        lineage_name_map = {
+            int(row["lineage_id"]): str(row["lineage_name"]).replace("Lineage " + str(int(row["lineage_id"])) + ": ", "")
+            for _, row in lineage_labels_df.iterrows()
+        }
+
+    # Relabel future_df so Movement/Stability charts use semantic names
+    if not future_df.empty and "topic_id" in future_df.columns:
+        future_df = future_df.copy()
+        future_df["topic_id"] = future_df["topic_id"].astype(int)
+        future_df["topic_label"] = future_df.apply(
+            lambda row: lineage_name_map.get(
+                int(row["topic_id"]),
+                row["topic_label"] if "topic_label" in future_df.columns else f"Lineage {int(row['topic_id'])}"
+            ),
+            axis=1
+        )
+
+    # Relabel topic_trajectories so PCA uses semantic names
+    if topic_trajectories is not None and lineage_name_map:
+        relabeled_trajectories = {}
+        for topic_id, info in topic_trajectories.items():
+            tid = int(topic_id)
+            relabeled_info = dict(info)
+            relabeled_info["label"] = lineage_name_map.get(tid, info.get("label", f"Lineage {tid}"))
+            relabeled_trajectories[tid] = relabeled_info
+        topic_trajectories = relabeled_trajectories
 
     movement_fig = go.Figure()
     cosine_fig = go.Figure()
@@ -132,7 +174,7 @@ def build_figures(run_name: str):
         for topic_id, info in topic_trajectories.items():
             traj = info["trajectory"]
             years = info["years"]
-            label = info["label"]
+            label = info.get("label", f"Lineage {topic_id}")
 
             for i, year in enumerate(years):
                 all_points.append(traj[i])
@@ -159,7 +201,7 @@ def build_figures(run_name: str):
 
             for topic_id in top_topic_ids:
                 group = top_meta_df[top_meta_df["topic_id"] == topic_id].sort_values("year")
-                if group.empty:
+                if group.empty or len(group) < 2:
                     continue
 
                 label = group["label"].iloc[0]
@@ -225,6 +267,9 @@ def build_figures(run_name: str):
 
     # Lineage
     if not lineage_df.empty:
+        lineage_df = lineage_df.copy()
+        lineage_df["lineage_id"] = lineage_df["lineage_id"].astype(int)
+
         lineage_summary = (
             lineage_df.groupby("lineage_id")
             .agg(
@@ -235,9 +280,10 @@ def build_figures(run_name: str):
             )
             .reset_index()
         )
+        lineage_summary["lineage_id"] = lineage_summary["lineage_id"].astype(int)
 
-        min_year = lineage_df["year"].min()
-        max_year = lineage_df["year"].max()
+        min_year = int(lineage_df["year"].min())
+        max_year = int(lineage_df["year"].max())
 
         def classify_lineage(row):
             if row["n_years"] >= 2:
@@ -251,26 +297,51 @@ def build_figures(run_name: str):
 
         lineage_summary["status"] = lineage_summary.apply(classify_lineage, axis=1)
 
-        lineage_name_df = pd.DataFrame({
-            "lineage_id": sorted(lineage_df["lineage_id"].unique())
-        })
-        lineage_name_df["lineage_name"] = lineage_name_df["lineage_id"].apply(
-            lambda x: f"Lineage {int(x)}"
-        )
+        if (
+            not lineage_labels_df.empty
+            and {"lineage_id", "lineage_name"}.issubset(lineage_labels_df.columns)
+        ):
+            lineage_labels_df = lineage_labels_df.copy()
+            lineage_labels_df["lineage_id"] = lineage_labels_df["lineage_id"].astype(int)
 
-        lineage_plot_df = lineage_df.merge(
-            lineage_summary[["lineage_id", "status", "total_docs"]],
-            on="lineage_id",
-            how="left"
-        ).merge(
-            lineage_name_df,
-            on="lineage_id",
-            how="left"
+            keep_cols = ["lineage_id", "lineage_name"]
+            if "top_terms" in lineage_labels_df.columns:
+                keep_cols.append("top_terms")
+
+            lineage_name_df = (
+                lineage_labels_df[keep_cols]
+                .drop_duplicates(subset=["lineage_id"])
+                .copy()
+            )
+        else:
+            lineage_name_df = pd.DataFrame({
+                "lineage_id": sorted(lineage_df["lineage_id"].unique())
+            })
+            lineage_name_df["lineage_name"] = lineage_name_df["lineage_id"].apply(
+                lambda x: f"Lineage {int(x)}"
+            )
+            lineage_name_df["top_terms"] = ""
+
+        if "top_terms" not in lineage_name_df.columns:
+            lineage_name_df["top_terms"] = ""
+
+        lineage_plot_df = (
+            lineage_df.merge(
+                lineage_summary[["lineage_id", "status", "total_docs"]],
+                on="lineage_id",
+                how="left"
+            )
+            .merge(
+                lineage_name_df,
+                on="lineage_id",
+                how="left"
+            )
         )
 
         lineage_plot_df["lineage_name"] = lineage_plot_df["lineage_name"].fillna(
             lineage_plot_df["lineage_id"].apply(lambda x: f"Lineage {int(x)}")
         )
+        lineage_plot_df["top_terms"] = lineage_plot_df["top_terms"].fillna("")
 
         lineage_plot_df["hover_text"] = (
             "<b>" + lineage_plot_df["lineage_name"] + "</b><br>"
@@ -278,7 +349,8 @@ def build_figures(run_name: str):
             + "Cluster ID: " + lineage_plot_df["cluster_id"].astype(str) + "<br>"
             + "Docs in node: " + lineage_plot_df["n_docs"].astype(str) + "<br>"
             + "Total docs in lineage: " + lineage_plot_df["total_docs"].astype(str) + "<br>"
-            + "Status: " + lineage_plot_df["status"].str.replace("_", " ", regex=False)
+            + "Status: " + lineage_plot_df["status"].str.replace("_", " ", regex=False) + "<br>"
+            + "Keywords: " + lineage_plot_df["top_terms"]
         )
 
         status_colors = {
@@ -320,7 +392,7 @@ def build_figures(run_name: str):
                 hoverinfo="text",
                 marker=dict(
                     color=color,
-                    size=group["n_docs"] * 0.45 + 10,
+                    size=(np.sqrt(group["n_docs"]) * 8 + 6),
                     line=dict(color="black", width=0.5)
                 )
             ))
@@ -471,6 +543,7 @@ def update_dashboard(run_name):
                 status_badge("Topic trajectories PKL", status["trajectories"]),
                 status_badge("HDBSCAN lineage CSV", status["lineage"]),
                 status_badge("Run metadata JSON", status["metadata"]),
+                status_badge("Lineage labels CSV", status["lineage_labels"]),
             ],
             style={
                 "padding": "16px",
