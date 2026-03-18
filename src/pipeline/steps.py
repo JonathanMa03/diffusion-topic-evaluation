@@ -143,25 +143,29 @@ def step_visualizations(config):
     meta_df["x"] = X_2d[:, 0]
     meta_df["y"] = X_2d[:, 1]
 
-    print("  Saving movement histogram...")
-    plt.figure(figsize=(9, 6))
-    plt.hist(future_results_df["movement_norm"], bins=10)
-    plt.xlabel("Movement norm")
-    plt.ylabel("Count")
-    plt.title("Distribution of Predicted Topic Movement")
+    print("  Saving movement plot...")
+    plot_df = future_results_df.sort_values("movement_norm", ascending=True)
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(plot_df["topic_label"], plot_df["movement_norm"])
+    plt.xlabel("Predicted movement norm")
+    plt.ylabel("Topic")
+    plt.title("Predicted 2023 Topic Movement (Neural Denoiser)")
     plt.tight_layout()
     plt.savefig(config.outputs_path / "movement_norm.png", dpi=300, bbox_inches="tight")
     plt.close()
 
-    print("  Saving cosine similarity histogram...")
-    plt.figure(figsize=(9, 6))
-    plt.hist(future_results_df["cosine_similarity_to_latest"], bins=10)
-    plt.xlabel("Cosine similarity to latest state")
-    plt.ylabel("Count")
-    plt.title("Cosine Similarity to Latest Topic State")
+    print("  Saving cosine similarity plot...")
+    plot_df = future_results_df.sort_values("cosine_similarity_to_latest", ascending=True)
+
+    plt.figure(figsize=(10, 6))
+    plt.barh(plot_df["topic_label"], plot_df["cosine_similarity_to_latest"])
+    plt.xlabel("Cosine similarity to 2022 state")
+    plt.ylabel("Topic")
+    plt.title("Predicted 2023 Stability Relative to 2022")
     plt.tight_layout()
     plt.savefig(config.outputs_path / "cosine_sim_latest.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    plt.close()    
 
     print("  Saving top-8 PCA trajectories...")
     TOP_K = 8
