@@ -19,21 +19,21 @@ This enables analysis of:
 ## Key Outputs
 
 ### Topic Movement Distribution
-![Movement Norm](outputs/movement_norm.png)
+![Movement Norm](displays/display_movement_norm.png)
 
 Distribution of topic movement magnitudes across time.
 
 ---
 
 ### Cosine Similarity Diagnostics
-![Cosine Similarity](outputs/cosine_sim_latest.png)
+![Cosine Similarity](displays/display_cosine_sim.png)
 
 Measures how well topics align across adjacent years.
 
 ---
 
 ### PCA Topic Trajectories (Top 8 Movers)
-![Top 8 PCA](outputs/top8_pca.png)
+![Top 8 PCA](displays/display_pca.png)
 
 Tracks semantic drift of the most dynamic topics in embedding space.
 
@@ -45,7 +45,7 @@ Encodes:
 ---
 
 ### HDBSCAN Lineage Structure
-![Lineage](outputs/linneage.png)
+![Lineage](displays/display_linneage.png)
 
 Tracks how clusters evolve across time.
 
