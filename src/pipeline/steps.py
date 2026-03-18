@@ -14,13 +14,384 @@ def _check_file_exists(path: Path, label: str) -> None:
 
 def step_ingestion(config):
     print("[STEP] Ingestion")
-    print(f"  Target years: {config.start_year} → {config.end_year}")
-    print("  Status: not implemented yet")
 
-    raise NotImplementedError(
-        "Ingestion step is not implemented yet. "
-        "Next action: move notebook 01 data ingestion logic into step_ingestion(config)."
+    import re
+    import sqlite3
+    import time
+    import requests
+    import pandas as pd
+    import xml.etree.ElementTree as ET
+
+    config.db_path.parent.mkdir(parents=True, exist_ok=True)
+    config.data_path.mkdir(parents=True, exist_ok=True)
+
+    # --- DB schema bootstrap ---
+    conn = sqlite3.connect(config.db_path)
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS documents (
+        id INTEGER PRIMARY KEY,
+        source TEXT,
+        source_doc_id TEXT,
+        title TEXT,
+        abstract TEXT,
+        publication_year INTEGER,
+        publication_date TEXT,
+        journal TEXT,
+        clean_text TEXT,
+        article_date TEXT,
+        article_year INTEGER,
+        journal_pub_date TEXT,
+        journal_pub_year INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(source, source_doc_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS document_embeddings (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER,
+        embedding BLOB,
+        model_name TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS topics (
+        id INTEGER PRIMARY KEY,
+        topic_id INTEGER,
+        topic_label TEXT,
+        top_terms TEXT,
+        n_docs INTEGER,
+        model_name TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(topic_id, model_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS document_topics (
+        id INTEGER PRIMARY KEY,
+        document_id INTEGER,
+        topic_id INTEGER,
+        model_name TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (document_id) REFERENCES documents(id),
+        UNIQUE(document_id, topic_id, model_name)
+    );
+    """)
+    conn.commit()
+
+    # --- PubMed config ---
+    eutils_base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    ncbi_tool = "diffusion_topic_evolution"
+    ncbi_email = "REMOVED_EMAIL"   # replace later if desired
+    ncbi_api_key = None
+
+    # Current project query from notebook work
+    pubmed_query = f'("covid-19"[Title/Abstract]) AND {config.start_year}:{config.end_year}[pdat]'
+
+    search_page_size = 200
+    fetch_batch_size = 25
+    target_pmids = 1000
+    sleep_seconds = 0.8
+
+    print(f"  Query: {pubmed_query}")
+    print(f"  Target PMIDs: {target_pmids}")
+    print(f"  Search page size: {search_page_size}")
+    print(f"  Fetch batch size: {fetch_batch_size}")
+
+    # --- Helper functions ---
+    def safe_text(elem):
+        return elem.text.strip() if elem is not None and elem.text is not None else None
+
+    def extract_abstract_text(article):
+        abstract_nodes = article.findall(".//Abstract/AbstractText")
+        if not abstract_nodes:
+            return None
+
+        parts = []
+        for node in abstract_nodes:
+            label = node.attrib.get("Label")
+            text = "".join(node.itertext()).strip()
+            if text:
+                parts.append(f"{label}: {text}" if label else text)
+
+        return " ".join(parts) if parts else None
+
+    def extract_journal_pub_date(article):
+        pub_date = article.find(".//JournalIssue/PubDate")
+        if pub_date is None:
+            return None, None
+
+        year = safe_text(pub_date.find("Year"))
+        month = safe_text(pub_date.find("Month"))
+        day = safe_text(pub_date.find("Day"))
+
+        publication_date = "-".join([x for x in [year, month, day] if x])
+        publication_year = int(year) if year and year.isdigit() else None
+
+        return publication_date or None, publication_year
+
+    def extract_article_date(article):
+        article_date = article.find(".//Article/ArticleDate")
+        if article_date is None:
+            return None, None
+
+        year = safe_text(article_date.find("Year"))
+        month = safe_text(article_date.find("Month"))
+        day = safe_text(article_date.find("Day"))
+
+        article_date_str = "-".join([x for x in [year, month, day] if x])
+        article_year = int(year) if year and year.isdigit() else None
+
+        return article_date_str or None, article_year
+
+    def parse_pubmed_xml_to_records(xml_text):
+        root = ET.fromstring(xml_text)
+        articles = root.findall(".//PubmedArticle")
+
+        records = []
+        for article in articles:
+            pmid = safe_text(article.find(".//PMID"))
+            title_node = article.find(".//ArticleTitle")
+            title = "".join(title_node.itertext()).strip() if title_node is not None else None
+            abstract = extract_abstract_text(article)
+            journal = safe_text(article.find(".//Journal/Title"))
+
+            journal_pub_date, journal_pub_year = extract_journal_pub_date(article)
+            article_date, article_year = extract_article_date(article)
+
+            publication_year = journal_pub_year if journal_pub_year is not None else article_year
+            publication_date = journal_pub_date if journal_pub_date is not None else article_date
+
+            records.append({
+                "source": "pubmed",
+                "source_doc_id": pmid,
+                "title": title,
+                "abstract": abstract,
+                "publication_year": publication_year,
+                "publication_date": publication_date,
+                "journal": journal,
+                "article_date": article_date,
+                "article_year": article_year,
+                "journal_pub_date": journal_pub_date,
+                "journal_pub_year": journal_pub_year,
+            })
+
+        return records
+
+    def fetch_pubmed_batch(pmids, max_retries=4, base_sleep=1.0):
+        fetch_params = {
+            "db": "pubmed",
+            "id": ",".join(pmids),
+            "retmode": "xml",
+            "tool": ncbi_tool,
+            "email": ncbi_email,
+        }
+
+        if ncbi_api_key:
+            fetch_params["api_key"] = ncbi_api_key
+
+        fetch_url = f"{eutils_base}/efetch.fcgi"
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                resp = requests.get(fetch_url, params=fetch_params, timeout=60)
+                resp.raise_for_status()
+                return resp.text
+            except requests.exceptions.RequestException as e:
+                print(f"   fetch retry {attempt}/{max_retries} failed: {type(e).__name__} - {e}")
+                if attempt == max_retries:
+                    raise
+                time.sleep(base_sleep * attempt)
+
+        raise RuntimeError("fetch_pubmed_batch failed unexpectedly")
+
+    # --- Search PMIDs ---
+    all_pmids = []
+    retstart = 0
+
+    while len(all_pmids) < target_pmids:
+        page_retmax = min(search_page_size, target_pmids - len(all_pmids))
+
+        search_params = {
+            "db": "pubmed",
+            "term": pubmed_query,
+            "retstart": retstart,
+            "retmax": page_retmax,
+            "retmode": "json",
+            "tool": ncbi_tool,
+            "email": ncbi_email,
+        }
+
+        if ncbi_api_key:
+            search_params["api_key"] = ncbi_api_key
+
+        search_resp = requests.get(f"{eutils_base}/esearch.fcgi", params=search_params, timeout=30)
+        search_resp.raise_for_status()
+
+        search_data = search_resp.json()
+        batch_pmids = search_data["esearchresult"].get("idlist", [])
+        total_count = int(search_data["esearchresult"].get("count", "0"))
+
+        if not batch_pmids:
+            print("  No more PMIDs returned; stopping early.")
+            break
+
+        all_pmids.extend(batch_pmids)
+        all_pmids = list(dict.fromkeys(all_pmids))
+
+        print(
+            f"  retstart={retstart:4d} | fetched={len(batch_pmids):3d} | "
+            f"collected={len(all_pmids):4d} / target={target_pmids} | total_available={total_count}"
+        )
+
+        retstart += len(batch_pmids)
+        time.sleep(sleep_seconds)
+
+    if not all_pmids:
+        conn.close()
+        raise ValueError(
+            f"No PubMed IDs found for query:\n{pubmed_query}\n\n"
+            "Likely causes:\n"
+            "- The selected year range returned no matches\n"
+            "- PubMed API request failed upstream"
+        )
+
+    print(f"  Final PMID count collected: {len(all_pmids)}")
+
+    # --- Fetch XML in batches ---
+    all_records = []
+    n_batches = (len(all_pmids) + fetch_batch_size - 1) // fetch_batch_size
+
+    for i in range(0, len(all_pmids), fetch_batch_size):
+        batch_num = (i // fetch_batch_size) + 1
+        pmid_batch = all_pmids[i:i + fetch_batch_size]
+
+        print(f"  Fetching batch {batch_num}/{n_batches} with {len(pmid_batch)} PMIDs...")
+        xml_text = fetch_pubmed_batch(pmid_batch)
+        batch_records = parse_pubmed_xml_to_records(xml_text)
+        all_records.extend(batch_records)
+
+    if not all_records:
+        conn.close()
+        raise ValueError("PubMed fetch completed, but zero records were parsed from XML.")
+
+    # --- Clean ---
+    df_raw = pd.DataFrame(all_records)
+    print(f"  Raw parsed records: {len(df_raw)}")
+
+    df = df_raw.copy()
+    df = df.dropna(subset=["title", "abstract", "publication_year"])
+
+    for col in [
+        "title",
+        "abstract",
+        "journal",
+        "publication_date",
+        "article_date",
+        "journal_pub_date",
+    ]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip()
+
+    df = df[
+        (df["title"].str.len() > 0) &
+        (df["abstract"].str.len() > 0) &
+        (df["title"].str.lower() != "nan") &
+        (df["abstract"].str.lower() != "nan")
+    ].copy()
+
+    df = df.drop_duplicates(subset=["source", "source_doc_id"])
+    df["clean_text"] = df["title"] + " " + df["abstract"]
+
+    if df.empty:
+        conn.close()
+        raise ValueError(
+            "All parsed records were removed during cleaning.\n\n"
+            "Likely causes:\n"
+            "- abstracts missing for all records\n"
+            "- malformed text fields\n"
+            "- too-restrictive query/date range"
+        )
+
+    print(f"  Cleaned records to insert: {len(df)}")
+
+    # --- Insert ---
+    cols = [
+        "source",
+        "source_doc_id",
+        "title",
+        "abstract",
+        "publication_year",
+        "publication_date",
+        "journal",
+        "clean_text",
+        "article_date",
+        "article_year",
+        "journal_pub_date",
+        "journal_pub_year",
+    ]
+
+    df_to_insert = df[cols].copy()
+
+    insert_sql = """
+    INSERT OR IGNORE INTO documents (
+        source,
+        source_doc_id,
+        title,
+        abstract,
+        publication_year,
+        publication_date,
+        journal,
+        clean_text,
+        article_date,
+        article_year,
+        journal_pub_date,
+        journal_pub_year
     )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    before_n = pd.read_sql_query("SELECT COUNT(*) AS n FROM documents", conn)["n"].iloc[0]
+
+    conn.executemany(insert_sql, df_to_insert.values.tolist())
+    conn.commit()
+
+    after_n = pd.read_sql_query("SELECT COUNT(*) AS n FROM documents", conn)["n"].iloc[0]
+
+    print(f"  Rows before insert: {before_n}")
+    print(f"  Rows attempted: {len(df_to_insert)}")
+    print(f"  Rows after insert: {after_n}")
+    print(f"  Rows newly added: {after_n - before_n}")
+
+    # --- Validation ---
+    year_counts = pd.read_sql_query("""
+        SELECT publication_year, COUNT(*) AS n_docs
+        FROM documents
+        WHERE publication_year BETWEEN ? AND ?
+        GROUP BY publication_year
+        ORDER BY publication_year
+    """, conn, params=[config.start_year, config.end_year])
+
+    dup_df = pd.read_sql_query("""
+        SELECT source, source_doc_id, COUNT(*) AS n
+        FROM documents
+        GROUP BY source, source_doc_id
+        HAVING COUNT(*) > 1
+        ORDER BY n DESC, source_doc_id
+    """, conn)
+
+    print("  Counts by year:")
+    for _, row in year_counts.iterrows():
+        print(f"   - {int(row['publication_year'])}: {int(row['n_docs'])}")
+
+    if not dup_df.empty:
+        conn.close()
+        raise ValueError(
+            "Duplicate (source, source_doc_id) rows detected after ingestion.\n"
+            "This suggests the DB uniqueness constraint or insert logic is inconsistent."
+        )
+
+    conn.close()
+    print("  Ingestion completed successfully with no duplicate document keys")
 
 
 def step_embeddings(config):
