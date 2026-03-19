@@ -112,7 +112,7 @@ Runs the entire workflow from raw data → embeddings → clustering → traject
 Step 1: Clone the repository
 
 ```text
-git clone https://github.com/JonathanMa03/diffusion-topic-evolution.git
+git clone https://github.com/JonathanMa03/diffusion-topic-evaluation.git
 cd diffusion-topic-evolution
 ```
 
@@ -153,14 +153,14 @@ jupyter lab
 ```
 
 Recommended order:
-	1.	01_data_ingestion.ipynb
-	2.	02_embedding_pipeline.ipynb
-	3.	03_topic_discovery.ipynb
-	4.	04_topic_dynamics.ipynb
-	5.	05_diffusion_topic_simulation.ipynb
-	6.	06_diffusion_denoising_model.ipynb
-	7.	07_bnp_dynamic_topics.ipynb
-	8.	08_topic_visualization.ipynb
+- 01_data_ingestion.ipynb
+- 02_embedding_pipeline.ipynb
+- 03_topic_discovery.ipynb
+- 04_topic_dynamics.ipynb
+- 05_diffusion_topic_simulation.ipynb
+- 06_diffusion_denoising_model.ipynb
+- 07_bnp_dynamic_topics.ipynb
+- 08_topic_visualization.ipynb
 
 ---
 
