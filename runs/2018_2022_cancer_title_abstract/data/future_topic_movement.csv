@@ -1,0 +1,9 @@
+topic_id,topic_label,latest_year,future_sigma,movement_norm,cosine_similarity_to_latest
+0,"Lineage 0: learning, emergency, artificial",2020,0.08,0.7932112,0.638052761554718
+1,"Lineage 1: food, allergy, food allergy",2021,0.08,0.17798737,0.9973417520523071
+2,"Lineage 2: spread, networks, mobile",2020,0.08,0.8235979,0.5952008366584778
+3,"Lineage 3: cross, cross sectional, sectional",2020,0.08,0.5582435,0.834610104560852
+4,"Lineage 4: cancer, patients, care",2022,0.08,0.33672538,0.9735376834869385
+5,"Lineage 5: digital, data, twitter",2020,0.08,0.74630535,0.7141479253768921
+6,"Lineage 6: cancer, microrna, rna",2021,0.08,0.98138547,0.3357183635234833
+7,"Lineage 7: genome, genome sequence, sequence",2022,0.08,1.2025338,-0.035998377948999405

@@ -1,0 +1,14 @@
+{
+  "run_name": "2019_2023_genomics_title_abstract",
+  "start_year": 2019,
+  "end_year": 2023,
+  "pubmed_query": "genomics[Title/Abstract]",
+  "embedding_model_name": "all-MiniLM-L6-v2",
+  "topic_model_name": "kmeans_all-MiniLM-L6-v2_k15",
+  "hdbscan_min_cluster_size": 5,
+  "hdbscan_min_samples": 2,
+  "started_at": "2026-03-19T08:32:53.801988",
+  "status": "completed",
+  "failed_stage": null,
+  "finished_at": "2026-03-19T08:33:45.177539"
+}

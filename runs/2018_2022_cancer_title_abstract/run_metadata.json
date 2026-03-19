@@ -1,0 +1,14 @@
+{
+  "run_name": "2018_2022_cancer_title_abstract",
+  "start_year": 2018,
+  "end_year": 2022,
+  "pubmed_query": "cancer[Title/Abstract]",
+  "embedding_model_name": "all-MiniLM-L6-v2",
+  "topic_model_name": "kmeans_all-MiniLM-L6-v2_k15",
+  "hdbscan_min_cluster_size": 5,
+  "hdbscan_min_samples": 2,
+  "started_at": "2026-03-19T08:29:55.659939",
+  "status": "completed",
+  "failed_stage": null,
+  "finished_at": "2026-03-19T08:30:52.313363"
+}

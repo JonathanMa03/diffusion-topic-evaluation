@@ -1,0 +1,18 @@
+{
+  "run_name": "2018_2022_cancer_title_abstract",
+  "start_year": 2018,
+  "end_year": 2022,
+  "pubmed_query": "cancer[Title/Abstract]",
+  "resolved_pubmed_query": "(cancer[Title/Abstract]) AND 2018:2022[pdat]",
+  "pmids_collected": 1000,
+  "raw_records": 996,
+  "cleaned_records": 915,
+  "rows_before_insert": 3193,
+  "rows_after_insert": 4066,
+  "rows_newly_added": 873,
+  "year_counts": {
+    "2020": 482,
+    "2021": 338,
+    "2022": 1112
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "run_name": "2019_2023_genomics_title_abstract",
+  "start_year": 2019,
+  "end_year": 2023,
+  "pubmed_query": "genomics[Title/Abstract]",
+  "resolved_pubmed_query": "(genomics[Title/Abstract]) AND 2019:2023[pdat]",
+  "pmids_collected": 1000,
+  "raw_records": 1000,
+  "cleaned_records": 955,
+  "rows_before_insert": 4066,
+  "rows_after_insert": 5013,
+  "rows_newly_added": 947,
+  "year_counts": {
+    "2020": 482,
+    "2021": 338,
+    "2022": 1114,
+    "2023": 2033
+  }
+}
