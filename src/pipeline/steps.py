@@ -577,6 +577,7 @@ def step_topics(config):
     import hdbscan
     from sklearn.preprocessing import normalize
     from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.feature_extraction.text import CountVectorizer, ENGLISH_STOP_WORDS
 
     _check_file_exists(config.db_path, "Database")
 
@@ -588,11 +589,15 @@ def step_topics(config):
 
     hdbscan_assignments_path = config.data_path / "hdbscan_assignments.csv"
     hdbscan_lineage_path = config.data_path / "hdbscan_lineage.csv"
+    centroids_path = config.data_path / "hdbscan_centroids.pkl"
+    lineage_labels_path = config.data_path / "lineage_labels.csv"
+    topic_trajectories_path = config.data_path / "topic_trajectories.pkl"
 
     run_hdbscan_assignments_path = run_data_dir / "hdbscan_assignments.csv"
     run_hdbscan_lineage_path = run_data_dir / "hdbscan_lineage.csv"
-
-    config.data_path.mkdir(parents=True, exist_ok=True)
+    run_centroids_path = run_data_dir / "hdbscan_centroids.pkl"
+    run_lineage_labels_path = run_data_dir / "lineage_labels.csv"
+    run_topic_trajectories_path = run_data_dir / "topic_trajectories.pkl"
 
     print(f"  Using DB: {config.db_path}")
     print(f"  Years: {config.start_year} → {config.end_year}")
@@ -619,15 +624,10 @@ def step_topics(config):
     conn.close()
 
     if docs_df.empty:
-        conn.close()
         raise ValueError(
-            f"No documents found in database for years "
-            f"{config.start_year}–{config.end_year}.\n\n"
-            "Likely causes:\n"
-            "- You have not run ingestion yet\n"
-            "- The selected date range has no data\n\n"
-            "Fix:\n"
-            "Run: python -m scripts.run_ingestion"
+            f"No documents with embeddings found for years "
+            f"{config.start_year}–{config.end_year} "
+            f"and model {config.embedding_model_name}."
         )
 
     docs_df["embedding"] = docs_df["embedding"].apply(
@@ -641,12 +641,10 @@ def step_topics(config):
     for year, n in year_counts.items():
         print(f"   - {year}: {n}")
 
-    # normalize embeddings
     X_all = np.vstack(docs_df["embedding"].values)
     X_all_norm = normalize(X_all, norm="l2")
     docs_df["embedding_norm"] = list(X_all_norm)
 
-    # cluster each year independently
     yearly_clustered = []
 
     for year in sorted(docs_df["publication_year"].unique()):
@@ -674,16 +672,13 @@ def step_topics(config):
 
     hdbscan_df = pd.concat(yearly_clustered, ignore_index=True)
 
-    # save assignments
     assignments_df = hdbscan_df[["document_id", "publication_year", "hdbscan_label"]].copy()
-
     assignments_df.to_csv(hdbscan_assignments_path, index=False)
     assignments_df.to_csv(run_hdbscan_assignments_path, index=False)
 
     print(f"  Saved shared HDBSCAN assignments to: {hdbscan_assignments_path}")
     print(f"  Saved run-specific HDBSCAN assignments to: {run_hdbscan_assignments_path}")
 
-    # filter out noise points
     clustered_df = hdbscan_df[hdbscan_df["hdbscan_label"] != -1].copy()
 
     if clustered_df.empty:
@@ -692,12 +687,10 @@ def step_topics(config):
             "Try lowering min_cluster_size or min_samples."
         )
 
-    # compute centroids per (year, cluster)
     centroids = []
 
     for (year, label), group in clustered_df.groupby(["publication_year", "hdbscan_label"]):
         X = np.vstack(group["embedding_norm"].values)
-
         centroid = X.mean(axis=0)
         centroid = centroid / np.linalg.norm(centroid)
 
@@ -709,12 +702,9 @@ def step_topics(config):
         })
 
     centroids_df = pd.DataFrame(centroids)
-    centroids_path = config.data_path / "hdbscan_centroids.pkl"
-    run_centroids_path = run_data_dir / "hdbscan_centroids.pkl"
 
     with open(centroids_path, "wb") as f:
         pickle.dump(centroids_df, f)
-
     with open(run_centroids_path, "wb") as f:
         pickle.dump(centroids_df, f)
 
@@ -723,18 +713,16 @@ def step_topics(config):
     print(f"  Built {len(centroids_df)} yearly topic centroids")
 
     years = sorted(centroids_df["publication_year"].unique())
-    if len(years) < 2:
+    if len(years) < 1:
         raise ValueError(
             "Need at least two years with non-noise HDBSCAN clusters to build lineage."
         )
 
-    # initialize lineage from first year
     lineage_records = []
     next_lineage_id = 0
 
     first_year = years[0]
     first_centroids = centroids_df[centroids_df["publication_year"] == first_year].copy()
-
     lineage_maps = {first_year: {}}
 
     for _, row in first_centroids.iterrows():
@@ -751,7 +739,6 @@ def step_topics(config):
 
     print(f"  Initialized {len(first_centroids)} lineages from {first_year}")
 
-    # match adjacent years
     sim_threshold = 0.8
 
     for idx in range(len(years) - 1):
@@ -778,10 +765,8 @@ def step_topics(config):
             })
 
         matches_df = pd.DataFrame(matches)
-
         lineage_maps[y_next] = {}
 
-        # propagate persistent matches
         for _, row in matches_df.iterrows():
             cid_prev = int(row["cluster_prev"])
             cid_next = int(row["cluster_next"])
@@ -790,7 +775,6 @@ def step_topics(config):
             if sim >= sim_threshold and cid_prev in lineage_maps[y_prev]:
                 lineage_maps[y_next][cid_next] = lineage_maps[y_prev][cid_prev]
 
-        # births for unmatched next-year clusters
         all_next_clusters = set(next_df["cluster_id"].astype(int).tolist())
         already_assigned = set(lineage_maps[y_next].keys())
         birth_clusters = sorted(all_next_clusters - already_assigned)
@@ -799,7 +783,6 @@ def step_topics(config):
             lineage_maps[y_next][cid] = next_lineage_id
             next_lineage_id += 1
 
-        # save clean records for y_next
         for _, row in next_df.iterrows():
             cid = int(row["cluster_id"])
             lineage_id = lineage_maps[y_next][cid]
@@ -819,23 +802,134 @@ def step_topics(config):
 
     lineage_df = pd.DataFrame(lineage_records).sort_values(["lineage_id", "year"])
 
+    if lineage_df.empty:
+        raise ValueError("Lineage dataframe is empty after topic processing.")
+
     lineage_df.to_csv(hdbscan_lineage_path, index=False)
     lineage_df.to_csv(run_hdbscan_lineage_path, index=False)
 
     print(f"  Saved shared lineage to: {hdbscan_lineage_path}")
     print(f"  Saved run-specific lineage to: {run_hdbscan_lineage_path}")
-
-    # lightweight validation
-    if lineage_df.empty:
-        raise ValueError("Lineage dataframe is empty after topic processing.")
-
     print(f"  Final lineage rows: {len(lineage_df)}")
-        # build topic trajectories from lineage + centroids
-    topic_trajectories = {}
 
-    centroids_lookup = {}
-    for _, row in centroids_df.iterrows():
-        centroids_lookup[(int(row["publication_year"]), int(row["cluster_id"]))] = row["centroid"]
+    lineage_summary = (
+        lineage_df.groupby("lineage_id")
+        .agg(
+            start_year=("year", "min"),
+            end_year=("year", "max"),
+            n_years=("year", "nunique"),
+            total_docs=("n_docs", "sum"),
+        )
+        .reset_index()
+    )
+
+    custom_stopwords = set(ENGLISH_STOP_WORDS).union({
+        "covid", "19", "covid19", "covid-19",
+        "sars", "cov", "sars-cov", "sars-cov-2",
+        "pandemic", "coronavirus", "disease",
+        "study", "studies", "using", "use",
+        "background", "objective", "objectives",
+        "methods", "results", "conclusion", "conclusions",
+        "analysis", "review", "health"
+    })
+
+    bad_terms = {
+        "covid", "19", "covid 19", "sars", "cov", "sars cov",
+        "pandemic", "coronavirus disease"
+    }
+
+    def make_lineage_label_from_titles(lineage_id, titles, top_n=4):
+        titles = [t for t in titles if isinstance(t, str) and t.strip()]
+
+        if len(titles) == 0:
+            return f"Lineage {int(lineage_id)}", ""
+
+        vectorizer = CountVectorizer(
+            stop_words=list(custom_stopwords),
+            max_features=100,
+            ngram_range=(1, 2),
+            min_df=1
+        )
+
+        X = vectorizer.fit_transform(titles)
+        terms = np.array(vectorizer.get_feature_names_out())
+        scores = np.asarray(X.sum(axis=0)).ravel()
+
+        ranked_terms = terms[np.argsort(scores)[::-1]].tolist()
+        top_terms = [t for t in ranked_terms if t not in bad_terms][:top_n]
+
+        if len(top_terms) == 0:
+            return f"Lineage {int(lineage_id)}", ""
+
+        short_name = ", ".join(top_terms[:3])
+        full_terms = "; ".join(top_terms)
+
+        return f"Lineage {int(lineage_id)}: {short_name}", full_terms
+
+    doc_lineage_df = assignments_df.merge(
+        lineage_df,
+        left_on=["publication_year", "hdbscan_label"],
+        right_on=["year", "cluster_id"],
+        how="left"
+    )
+
+    doc_lineage_df = doc_lineage_df.merge(
+        docs_df[["document_id", "title", "clean_text"]],
+        on="document_id",
+        how="left"
+    )
+
+    lineage_label_rows = []
+
+    for lineage_id, group in doc_lineage_df.dropna(subset=["lineage_id"]).groupby("lineage_id"):
+        lineage_id = int(lineage_id)
+        titles = group["title"].dropna().tolist()
+
+        lineage_name, top_terms_str = make_lineage_label_from_titles(
+            lineage_id=lineage_id,
+            titles=titles,
+            top_n=4
+        )
+
+        rep_titles = (
+            group["title"]
+            .dropna()
+            .astype(str)
+            .drop_duplicates()
+            .head(3)
+            .tolist()
+        )
+
+        summary_row = lineage_summary[lineage_summary["lineage_id"] == lineage_id].iloc[0]
+
+        lineage_label_rows.append({
+            "lineage_id": lineage_id,
+            "lineage_name": lineage_name,
+            "top_terms": top_terms_str,
+            "representative_titles": " || ".join(rep_titles),
+            "n_docs_total": int(summary_row["total_docs"]),
+            "start_year": int(summary_row["start_year"]),
+            "end_year": int(summary_row["end_year"]),
+            "n_years": int(summary_row["n_years"]),
+        })
+
+    lineage_labels_df = pd.DataFrame(lineage_label_rows).sort_values("lineage_id")
+
+    lineage_labels_df.to_csv(lineage_labels_path, index=False)
+    lineage_labels_df.to_csv(run_lineage_labels_path, index=False)
+
+    print(f"  Saved shared lineage labels to: {lineage_labels_path}")
+    print(f"  Saved run-specific lineage labels to: {run_lineage_labels_path}")
+
+    lineage_name_map = dict(
+        zip(lineage_labels_df["lineage_id"].astype(int), lineage_labels_df["lineage_name"])
+    )
+
+    topic_trajectories = {}
+    centroids_lookup = {
+        (int(row["publication_year"]), int(row["cluster_id"])): row["centroid"]
+        for _, row in centroids_df.iterrows()
+    }
 
     for lineage_id, group in lineage_df.groupby("lineage_id"):
         group = group.sort_values("year")
@@ -857,17 +951,15 @@ def step_topics(config):
         if len(years_seq) == 0:
             continue
 
-        topic_trajectories[int(lineage_id)] = {
+        lineage_id_int = int(lineage_id)
+        topic_trajectories[lineage_id_int] = {
             "years": years_seq,
             "trajectory": trajectory_seq,
-            "label": f"Lineage {int(lineage_id)}",
+            "label": lineage_name_map.get(lineage_id_int, f"Lineage {lineage_id_int}"),
         }
 
     if not topic_trajectories:
         raise ValueError("Topic trajectories could not be built from lineage and centroids.")
-
-    topic_trajectories_path = config.data_path / "topic_trajectories.pkl"
-    run_topic_trajectories_path = run_data_dir / "topic_trajectories.pkl"
 
     with open(topic_trajectories_path, "wb") as f:
         pickle.dump(topic_trajectories, f)
@@ -877,7 +969,6 @@ def step_topics(config):
 
     print(f"  Saved shared topic trajectories to: {topic_trajectories_path}")
     print(f"  Saved run-specific topic trajectories to: {run_topic_trajectories_path}")
-
     print(f"  Built {len(topic_trajectories)} topic trajectories")
     print("  Topic artifacts saved successfully")
 
@@ -1145,19 +1236,22 @@ def step_diffusion(config):
     for topic_id, info in topic_trajectories.items():
         years = info["years"]
         traj = info["trajectory"]
+        label = info.get("label", f"Lineage {int(topic_id)}")
 
-        if len(years) == 0:
+        # require at least 2 years so the topic has an actual trajectory
+        if len(years) < 1:
             continue
 
         latest_states.append({
-            "topic_id": topic_id,
-            "topic_label": info["label"],
-            "latest_year": years[-1],
+            "topic_id": int(topic_id),
+            "topic_label": label,
+            "latest_year": int(years[-1]),
+            "n_years": int(len(years)),
             "x_latest": np.asarray(traj[-1], dtype=np.float32),
         })
 
     latest_df = pd.DataFrame(latest_states)
-    future_df = latest_df[latest_df["latest_year"] == config.end_year].copy()
+    future_df = latest_df.copy()
 
     if future_df.empty:
         raise ValueError(
@@ -1254,7 +1348,6 @@ def step_diffusion(config):
     print(f"   - run PKL: {run_future_pkl_path}")
     print(f"   - run model: {run_model_path}")
 
-
 def step_visualizations(config):
     print("[STEP] Visualizations")
 
@@ -1264,13 +1357,14 @@ def step_visualizations(config):
     import numpy as np
     import pandas as pd
     import matplotlib.pyplot as plt
-    from sklearn.decomposition import PCA
+    import umap
 
     _check_file_exists(config.data_path, "Data directory")
 
     traj_path = config.data_path / "topic_trajectories.pkl"
     future_path = config.data_path / "future_topic_movement.csv"
     lineage_path = config.data_path / "hdbscan_lineage.csv"
+    lineage_labels_path = config.data_path / "lineage_labels.csv"
 
     required_inputs = [traj_path, future_path, lineage_path]
     for path in required_inputs:
@@ -1289,47 +1383,60 @@ def step_visualizations(config):
     future_results_df = pd.read_csv(future_path)
     lineage_df = pd.read_csv(lineage_path)
 
+    lineage_labels_df = pd.DataFrame()
+    if lineage_labels_path.exists():
+        lineage_labels_df = pd.read_csv(lineage_labels_path)
+
     print(f"   - trajectories: {len(topic_trajectories)} topics")
     print(f"   - future movement rows: {len(future_results_df)}")
     print(f"   - lineage rows: {len(lineage_df)}")
 
     def wrap_label(s, width=24):
-        return "\n".join(textwrap.wrap(s, width=width))
+        return "\n".join(textwrap.wrap(str(s), width=width))
 
-    year_markers = {
-        2020: "o",
-        2021: "s",
-        2022: "^",
-    }
+    # dynamic year markers
+    marker_cycle = ["o", "s", "^", "D", "P", "X", "*", "v", "<", ">"]
 
     movement_lookup = future_results_df.set_index("topic_id")["movement_norm"].to_dict()
 
-    print("  Building PCA trajectory data...")
+    print("  Building UMAP trajectory data...")
     all_points = []
     meta = []
 
     for topic_id, info in topic_trajectories.items():
         traj = info["trajectory"]
         years = info["years"]
-        label = info["label"]
+        label = info.get("label", f"Lineage {int(topic_id)}")
 
         for i, year in enumerate(years):
             all_points.append(traj[i])
             meta.append({
-                "topic_id": topic_id,
+                "topic_id": int(topic_id),
                 "label": label,
-                "year": year,
-                "movement_norm": movement_lookup.get(topic_id, np.nan),
+                "year": int(year),
+                "movement_norm": movement_lookup.get(int(topic_id), np.nan),
             })
 
     if len(all_points) == 0:
-        raise ValueError("No trajectory points found for PCA visualization.")
+        raise ValueError("No trajectory points found for UMAP visualization.")
 
     X_all = np.vstack(all_points)
     meta_df = pd.DataFrame(meta)
 
-    pca = PCA(n_components=2)
-    X_2d = pca.fit_transform(X_all)
+    unique_years = sorted(meta_df["year"].unique())
+    year_markers = {
+        year: marker_cycle[i % len(marker_cycle)]
+        for i, year in enumerate(unique_years)
+    }
+
+    reducer = umap.UMAP(
+        n_components=2,
+        n_neighbors=min(5, len(X_all) - 1),
+        min_dist=0.15,
+        metric="cosine",
+        random_state=42,
+    )
+    X_2d = reducer.fit_transform(X_all)
 
     meta_df["x"] = X_2d[:, 0]
     meta_df["y"] = X_2d[:, 1]
@@ -1341,8 +1448,9 @@ def step_visualizations(config):
     plt.barh(plot_df["topic_label"], plot_df["movement_norm"])
     plt.xlabel("Predicted movement norm")
     plt.ylabel("Topic")
-    plt.title("Predicted 2023 Topic Movement (Neural Denoiser)")
+    plt.title("Predicted Topic Movement for the Next Time Step")
     plt.tight_layout()
+
     shared_path = config.outputs_path / "movement_norm.png"
     run_path = run_outputs_dir / "movement_norm.png"
     plt.savefig(shared_path, dpi=300, bbox_inches="tight")
@@ -1354,46 +1462,50 @@ def step_visualizations(config):
 
     plt.figure(figsize=(10, 6))
     plt.barh(plot_df["topic_label"], plot_df["cosine_similarity_to_latest"])
-    plt.xlabel("Cosine similarity to 2022 state")
+    plt.xlabel("Cosine similarity to latest observed period")
     plt.ylabel("Topic")
-    plt.title("Predicted 2023 Stability Relative to 2022")
+    plt.title("Predicted Topic Stability Relative to the Latest Observed Period")
     plt.tight_layout()
+
     shared_path = config.outputs_path / "cosine_sim_latest.png"
     run_path = run_outputs_dir / "cosine_sim_latest.png"
     plt.savefig(shared_path, dpi=300, bbox_inches="tight")
     plt.savefig(run_path, dpi=300, bbox_inches="tight")
-    plt.close()    
+    plt.close()
 
-    print("  Saving top-8 PCA trajectories...")
-    TOP_K = 8
-    top_topic_ids = (
-        future_results_df
-        .sort_values("movement_norm", ascending=False)
-        .head(TOP_K)["topic_id"]
-        .tolist()
-    )
+    print("  Saving top UMAP trajectories...")
+    top_topic_ids = top_topic_ids = future_results_df["topic_id"].astype(int).tolist()
 
     top_meta_df = meta_df[meta_df["topic_id"].isin(top_topic_ids)].copy()
 
     plt.figure(figsize=(13, 9))
-    cmap = plt.cm.get_cmap("tab10", len(top_topic_ids))
+    cmap = plt.cm.get_cmap("tab10", max(len(top_topic_ids), 1))
 
     for i, topic_id in enumerate(top_topic_ids):
         group = top_meta_df[top_meta_df["topic_id"] == topic_id].sort_values("year")
+        if group.empty or len(group) < 2:
+            continue
 
         x = group["x"].values
         y = group["y"].values
-        label = group["label"].iloc[0]
         movement = group["movement_norm"].iloc[0]
+        movement = float(movement) if not pd.isna(movement) else 0.0
+        label = group["label"].iloc[0]
         color = cmap(i)
 
         lw = 2 + 2.5 * movement
+        lw = max(lw, 2.5)
 
         plt.plot(x, y, linewidth=lw, alpha=0.9, color=color)
 
+        # highlight start and end
+        plt.scatter(x[0], y[0], s=120, color=color, marker="o", edgecolor="black", linewidth=0.5, zorder=4)
+        plt.scatter(x[-1], y[-1], s=140, color=color, marker="X", edgecolor="black", linewidth=0.5, zorder=5)
+
         for _, row in group.iterrows():
             plt.scatter(
-                row["x"], row["y"],
+                row["x"],
+                row["y"],
                 marker=year_markers.get(row["year"], "o"),
                 s=100,
                 color=color,
@@ -1416,11 +1528,13 @@ def step_visualizations(config):
             )
 
         last = group.iloc[-1]
-        dx = 10 if last["x"] < 0.3 else -10
-        dy = 8 if last["y"] < 0 else -8
+        dx = 10 if last["x"] < np.median(top_meta_df["x"]) else -10
+        dy = 8 if last["y"] < np.median(top_meta_df["y"]) else -8
+
+        display_label = f"{label} (Δ={movement:.2f})"
 
         plt.annotate(
-            wrap_label(label, width=22),
+            wrap_label(display_label, width=24),
             xy=(last["x"], last["y"]),
             xytext=(dx, dy),
             textcoords="offset points",
@@ -1436,14 +1550,15 @@ def step_visualizations(config):
     for year, marker in year_markers.items():
         plt.scatter([], [], marker=marker, s=90, label=str(year), color="black")
 
-    plt.title("Top 8 Moving Topic Trajectories (PCA Projection)", fontsize=15)
+    plt.title("Top Moving Topic Trajectories (UMAP Projection)", fontsize=15)
     plt.xlabel("PC1")
     plt.ylabel("PC2")
     plt.legend(title="Year", loc="upper left", bbox_to_anchor=(1.01, 1))
     plt.grid(alpha=0.25)
     plt.tight_layout()
-    shared_path = config.outputs_path / "top8_pca.png"
-    run_path = run_outputs_dir / "top8_pca.png"
+
+    shared_path = config.outputs_path / "top8_umap.png"
+    run_path = run_outputs_dir / "top8_umap.png"
     plt.savefig(shared_path, dpi=300, bbox_inches="tight")
     plt.savefig(run_path, dpi=300, bbox_inches="tight")
     plt.close()
@@ -1460,40 +1575,42 @@ def step_visualizations(config):
         .reset_index()
     )
 
+    min_year = int(lineage_df["year"].min())
+    max_year = int(lineage_df["year"].max())
+
     def classify_lineage(row):
         if row["n_years"] >= 2:
             return "persistent"
-        elif row["start_year"] == 2020 and row["end_year"] == 2020:
-            return "dies_after_2020"
-        elif row["start_year"] == 2021 and row["end_year"] == 2021:
-            return "born_in_2021"
+        elif row["start_year"] == min_year and row["end_year"] == min_year:
+            return "early_only"
+        elif row["start_year"] == max_year and row["end_year"] == max_year:
+            return "late_only"
         else:
             return "other"
 
     lineage_summary["status"] = lineage_summary.apply(classify_lineage, axis=1)
 
-    lineage_name_map = {
-        0: "Lineage 0: Medical imaging cluster",
-        1: "Lineage 1: Mobility and network spread cluster",
-        2: "Lineage 2: Cross-sectional public health cluster",
-        3: "Lineage 3: Main clinical care cluster",
-        4: "Lineage 4: Digital media and infodemic cluster",
-        5: "Lineage 5: Online biomedical education cluster",
-        6: "Lineage 6: Financial markets cluster",
-    }
-
-    lineage_name_df = pd.DataFrame(
-        [{"lineage_id": k, "lineage_name": v} for k, v in lineage_name_map.items()]
-    )
+    if (
+        not lineage_labels_df.empty
+        and {"lineage_id", "lineage_name"}.issubset(lineage_labels_df.columns)
+    ):
+        lineage_name_df = lineage_labels_df[["lineage_id", "lineage_name"]].drop_duplicates().copy()
+    else:
+        lineage_name_df = pd.DataFrame({
+            "lineage_id": sorted(lineage_df["lineage_id"].unique())
+        })
+        lineage_name_df["lineage_name"] = lineage_name_df["lineage_id"].apply(
+            lambda x: f"Lineage {int(x)}"
+        )
 
     lineage_plot_df = lineage_df.merge(
         lineage_summary[["lineage_id", "status", "total_docs"]],
         on="lineage_id",
-        how="left"
+        how="left",
     ).merge(
         lineage_name_df,
         on="lineage_id",
-        how="left"
+        how="left",
     )
 
     lineage_plot_df["lineage_name"] = lineage_plot_df["lineage_name"].fillna(
@@ -1502,8 +1619,8 @@ def step_visualizations(config):
 
     status_colors = {
         "persistent": "tab:blue",
-        "dies_after_2020": "tab:red",
-        "born_in_2021": "tab:green",
+        "early_only": "tab:red",
+        "late_only": "tab:green",
         "other": "gray",
     }
 
@@ -1529,12 +1646,12 @@ def step_visualizations(config):
         plt.scatter(
             x,
             y,
-            s=group["n_docs"].values * 7,
+            s=(np.sqrt(group["n_docs"].values) * 20) + 20,
             color=color,
             alpha=0.95,
             edgecolor="black",
             linewidth=0.5,
-            zorder=3
+            zorder=3,
         )
 
         for _, row in group.iterrows():
@@ -1544,12 +1661,12 @@ def step_visualizations(config):
                 xytext=(6, 4),
                 textcoords="offset points",
                 fontsize=8,
-                color=color
+                color=color,
             )
 
         plt.annotate(
             f"{lineage_name} (total n={total_docs})",
-            xy=(2019.74, lineage_id),
+            xy=(min_year - 0.25, lineage_id),
             xytext=(-5, 0),
             textcoords="offset points",
             ha="right",
@@ -1560,17 +1677,18 @@ def step_visualizations(config):
                 boxstyle="round,pad=0.25",
                 fc="white",
                 ec=color,
-                alpha=0.92
-            )
+                alpha=0.92,
+            ),
         )
 
-    plt.xlim(2019.55, 2021.08)
-    plt.xticks([2020, 2021])
+    plt.xlim(min_year - 0.45, max_year + 0.25)
+    plt.xticks(sorted(lineage_df["year"].unique()))
     plt.xlabel("Year")
     plt.ylabel("Lineage ID")
     plt.title("Dynamic Topic Lineages (HDBSCAN + Semantic Labels)", fontsize=14)
     plt.grid(axis="x", alpha=0.2)
-    plt.subplots_adjust(left=0.38)
+    plt.subplots_adjust(left=0.40)
+
     shared_path = config.outputs_path / "linneage.png"
     run_path = run_outputs_dir / "linneage.png"
     plt.savefig(shared_path, dpi=300, bbox_inches="tight")
@@ -1580,11 +1698,11 @@ def step_visualizations(config):
     print("  Saved shared outputs:")
     print(f"   - {config.outputs_path / 'movement_norm.png'}")
     print(f"   - {config.outputs_path / 'cosine_sim_latest.png'}")
-    print(f"   - {config.outputs_path / 'top8_pca.png'}")
+    print(f"   - {config.outputs_path / 'top8_umap.png'}")
     print(f"   - {config.outputs_path / 'linneage.png'}")
 
     print("  Saved run-specific outputs:")
     print(f"   - {run_outputs_dir / 'movement_norm.png'}")
     print(f"   - {run_outputs_dir / 'cosine_sim_latest.png'}")
-    print(f"   - {run_outputs_dir / 'top8_pca.png'}")
+    print(f"   - {run_outputs_dir / 'top8_umap.png'}")
     print(f"   - {run_outputs_dir / 'linneage.png'}")

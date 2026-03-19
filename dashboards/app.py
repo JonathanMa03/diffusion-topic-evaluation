@@ -83,39 +83,6 @@ def build_figures(run_name: str):
     topic_trajectories = load_trajectories(run_name)
     lineage_df = load_lineage_df(run_name)
     lineage_labels_df = load_lineage_labels_df(run_name)
-    lineage_name_map = {}
-    if (
-        not lineage_labels_df.empty
-        and {"lineage_id", "lineage_name"}.issubset(lineage_labels_df.columns)
-    ):
-        lineage_labels_df = lineage_labels_df.copy()
-        lineage_labels_df["lineage_id"] = lineage_labels_df["lineage_id"].astype(int)
-        lineage_name_map = {
-            int(row["lineage_id"]): str(row["lineage_name"]).replace("Lineage " + str(int(row["lineage_id"])) + ": ", "")
-            for _, row in lineage_labels_df.iterrows()
-        }
-
-    # Relabel future_df so Movement/Stability charts use semantic names
-    if not future_df.empty and "topic_id" in future_df.columns:
-        future_df = future_df.copy()
-        future_df["topic_id"] = future_df["topic_id"].astype(int)
-        future_df["topic_label"] = future_df.apply(
-            lambda row: lineage_name_map.get(
-                int(row["topic_id"]),
-                row["topic_label"] if "topic_label" in future_df.columns else f"Lineage {int(row['topic_id'])}"
-            ),
-            axis=1
-        )
-
-    # Relabel topic_trajectories so PCA uses semantic names
-    if topic_trajectories is not None and lineage_name_map:
-        relabeled_trajectories = {}
-        for topic_id, info in topic_trajectories.items():
-            tid = int(topic_id)
-            relabeled_info = dict(info)
-            relabeled_info["label"] = lineage_name_map.get(tid, info.get("label", f"Lineage {tid}"))
-            relabeled_trajectories[tid] = relabeled_info
-        topic_trajectories = relabeled_trajectories
 
     movement_fig = go.Figure()
     cosine_fig = go.Figure()
@@ -162,11 +129,7 @@ def build_figures(run_name: str):
     if topic_trajectories is not None and not future_df.empty:
         movement_lookup = future_df.set_index("topic_id")["movement_norm"].to_dict()
 
-        top_topic_ids = (
-            future_df.sort_values("movement_norm", ascending=False)
-            .head(TOP_K)["topic_id"]
-            .tolist()
-        )
+        top_topic_ids = sorted(int(k) for k in topic_trajectories.keys())
 
         all_points = []
         meta = []
@@ -486,7 +449,7 @@ app.layout = html.Div(
                         html.Div(
                             style={"padding": "24px 8px"},
                             children=[
-                                html.H2(f"Top {TOP_K} Topic Trajectories"),
+                                html.H2(f"Topic Trajectories"),
                                 dcc.Graph(id="pca-graph"),
                             ],
                         )
