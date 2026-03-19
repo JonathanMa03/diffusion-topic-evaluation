@@ -246,7 +246,6 @@ temp/
 .cache/
 .pytest_cache/
 .mypy_cache/
-ruff_cache/
 
 # Serialized arrays / embeddings / checkpoints
 *.npy
@@ -273,3 +272,23 @@ ruff_cache/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+runs/
+*.log
+*.tmp
+
+# HuggingFace cache
+.huggingface/
+.cache/huggingface/
+
+# Torch / model cache
+*.bin
+*.safetensors
+
+*.feather
+
+numba_cache/
+
+assets/*.map
+
+Thumbs.db

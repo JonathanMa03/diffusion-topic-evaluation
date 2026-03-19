@@ -1,37 +1,52 @@
+# Core
 numpy
 pandas
 scipy
 scikit-learn
 matplotlib
-plotly
 seaborn
+plotly
 
+# Database
 sqlalchemy
 alembic
+sqlite-utils
 
+# NLP / ML
 sentence-transformers
 transformers
 torch
+torchvision
 accelerate
-
-umap-learn
-hdbscan
-
 nltk
 spacy
-tqdm
 
+# Clustering / Manifold
+umap-learn
+hdbscan
+numba
+
+# Dashboard
+dash
+dash-bootstrap-components
+
+# Utilities
+tqdm
+joblib
 python-dotenv
 pyyaml
-joblib
+requests
+httpx
 
+# Dev / tooling
 pytest
 black
 ruff
 
-jupyter
+# Notebook
 jupyterlab
 ipykernel
-notebook
 
-requests
+# Optional (recommended)
+loguru
+rich
